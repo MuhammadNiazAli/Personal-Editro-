@@ -16,6 +16,28 @@ interface CanvasProps {
 
 type TextAlign = 'left' | 'center' | 'right';
 
+type BrushMode =
+  | 'normal'
+  | 'pencil'
+  | 'pen'
+  | 'marker'
+  | 'calligraphy'
+  | 'spray'
+  | 'dotted'
+  | 'square'
+  | 'glow'
+  | 'watercolor'
+  | 'crayon'
+  | 'chalk'
+  | 'charcoal'
+  | 'neon'
+  | 'ribbon'
+  | 'fur'
+  | 'sketch'
+  | 'ink'
+  | 'shadow'
+  | 'eraser';
+
 type TextToolExtraState = {
   fontFamily?: string;
   fontSize?: number;
@@ -27,6 +49,25 @@ type TextToolExtraState = {
   textAlign?: TextAlign;
   textBoxWidth?: number;
 };
+
+type BrushToolExtraState = {
+  selectedBrush?: string;
+  brushMode?: BrushMode;
+  brushSize?: number;
+  brushColor?: string;
+  brushOpacity?: number;
+  brushSpacing?: number;
+  brushJitter?: number;
+  brushScatter?: number;
+  brushSoftness?: number;
+  brushAngle?: number;
+  brushPressure?: number;
+  brushGlow?: number;
+  brushTexture?: boolean;
+  brushComposite?: GlobalCompositeOperation;
+};
+
+type CanvasToolState = TextToolExtraState & BrushToolExtraState;
 
 type TextDrawElement = DrawElement & {
   text?: string;
@@ -41,6 +82,27 @@ type TextDrawElement = DrawElement & {
   fontFamily?: string;
   fontSize?: number;
 };
+
+type BrushDrawElement = DrawElement & {
+  brushMode?: BrushMode;
+  selectedBrush?: string;
+  brushSpacing?: number;
+  brushJitter?: number;
+  brushScatter?: number;
+  brushSoftness?: number;
+  brushAngle?: number;
+  brushPressure?: number;
+  brushGlow?: number;
+  brushTexture?: boolean;
+  brushComposite?: GlobalCompositeOperation;
+};
+
+interface TextEditor {
+  x: number;
+  y: number;
+  value: string;
+  width: number;
+}
 
 function polygonPoints(
   cx: number,
@@ -212,6 +274,840 @@ function drawDecorationLine(
   ctx.stroke();
 }
 
+function distance(a: Point, b: Point) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
+}
+
+function lerpPoint(a: Point, b: Point, t: number): Point {
+  return {
+    x: lerp(a.x, b.x, t),
+    y: lerp(a.y, b.y, t),
+  };
+}
+
+function pseudoRandom(seed: number) {
+  const value = Math.sin(seed * 999.9283) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function pointSeed(point: Point, index: number, salt = 1) {
+  return point.x * 12.9898 + point.y * 78.233 + index * 37.719 + salt * 91.17;
+}
+
+function withAlpha(
+  ctx: CanvasRenderingContext2D,
+  opacity: number,
+  callback: () => void,
+) {
+  const oldAlpha = ctx.globalAlpha;
+
+  ctx.globalAlpha = opacity;
+  callback();
+  ctx.globalAlpha = oldAlpha;
+}
+
+function getBrushColor(element: BrushDrawElement) {
+  return element.color ?? '#000000';
+}
+
+function getBrushSize(element: BrushDrawElement) {
+  return Math.max(1, element.size ?? 4);
+}
+
+function getBrushOpacity(element: BrushDrawElement) {
+  return Math.min(Math.max(element.opacity ?? 1, 0.01), 1);
+}
+
+function forEachSampledPoint(
+  points: Point[],
+  spacing: number,
+  callback: (point: Point, index: number, angle: number) => void,
+) {
+  if (points.length === 0) return;
+
+  const safeSpacing = Math.max(1, spacing);
+  let sampleIndex = 0;
+
+  callback(points[0], sampleIndex, 0);
+  sampleIndex += 1;
+
+  for (let i = 1; i < points.length; i++) {
+    const previous = points[i - 1];
+    const current = points[i];
+    const segmentDistance = distance(previous, current);
+
+    if (segmentDistance <= 0) continue;
+
+    const steps = Math.max(1, Math.floor(segmentDistance / safeSpacing));
+    const angle = Math.atan2(current.y - previous.y, current.x - previous.x);
+
+    for (let step = 1; step <= steps; step++) {
+      const t = step / steps;
+      const point = lerpPoint(previous, current, t);
+
+      callback(point, sampleIndex, angle);
+      sampleIndex += 1;
+    }
+  }
+}
+
+function drawSmoothStroke(
+  ctx: CanvasRenderingContext2D,
+  points: Point[],
+  color: string,
+  size: number,
+  opacity: number,
+  composite: GlobalCompositeOperation,
+  cap: CanvasLineCap = 'round',
+  join: CanvasLineJoin = 'round',
+) {
+  if (points.length < 2) return;
+
+  ctx.save();
+
+  ctx.globalCompositeOperation = composite;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = size;
+  ctx.lineCap = cap;
+  ctx.lineJoin = join;
+  ctx.globalAlpha = opacity;
+
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+
+  if (points.length === 2) {
+    ctx.lineTo(points[1].x, points[1].y);
+  } else {
+    for (let i = 1; i < points.length - 1; i++) {
+      const midX = (points[i].x + points[i + 1].x) / 2;
+      const midY = (points[i].y + points[i + 1].y) / 2;
+
+      ctx.quadraticCurveTo(points[i].x, points[i].y, midX, midY);
+    }
+
+    const lastPoint = points[points.length - 1];
+    ctx.lineTo(lastPoint.x, lastPoint.y);
+  }
+
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawJitterStroke(
+  ctx: CanvasRenderingContext2D,
+  points: Point[],
+  color: string,
+  size: number,
+  opacity: number,
+  jitter: number,
+  passes: number,
+  composite: GlobalCompositeOperation,
+) {
+  if (points.length < 2) return;
+
+  for (let pass = 0; pass < passes; pass++) {
+    const jittered = points.map((point, index) => {
+      const seedA = pointSeed(point, index, pass + 1);
+      const seedB = pointSeed(point, index, pass + 7);
+
+      return {
+        x: point.x + (pseudoRandom(seedA) - 0.5) * jitter,
+        y: point.y + (pseudoRandom(seedB) - 0.5) * jitter,
+      };
+    });
+
+    drawSmoothStroke(
+      ctx,
+      jittered,
+      color,
+      size,
+      opacity / passes,
+      composite,
+    );
+  }
+}
+
+function drawSprayStroke(
+  ctx: CanvasRenderingContext2D,
+  element: BrushDrawElement,
+) {
+  const points = element.points ?? [];
+  const color = getBrushColor(element);
+  const size = getBrushSize(element);
+  const opacity = getBrushOpacity(element);
+  const scatter = element.brushScatter ?? size * 1.5;
+  const spacing = element.brushSpacing ?? 3;
+  const composite = element.brushComposite ?? 'source-over';
+
+  ctx.save();
+  ctx.globalCompositeOperation = composite;
+  ctx.fillStyle = color;
+
+  forEachSampledPoint(points, spacing, (point, index) => {
+    const dotCount = Math.max(6, Math.floor(size * 1.4));
+
+    for (let i = 0; i < dotCount; i++) {
+      const seed = pointSeed(point, index, i + 10);
+      const angle = pseudoRandom(seed) * Math.PI * 2;
+      const radius = pseudoRandom(seed + 4) * scatter;
+      const dotSize = Math.max(0.7, pseudoRandom(seed + 9) * Math.max(2, size * 0.16));
+
+      ctx.globalAlpha = opacity * (0.2 + pseudoRandom(seed + 13) * 0.6);
+
+      ctx.beginPath();
+      ctx.arc(
+        point.x + Math.cos(angle) * radius,
+        point.y + Math.sin(angle) * radius,
+        dotSize,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+    }
+  });
+
+  ctx.restore();
+}
+
+function drawDottedStroke(
+  ctx: CanvasRenderingContext2D,
+  element: BrushDrawElement,
+) {
+  const points = element.points ?? [];
+  const color = getBrushColor(element);
+  const size = getBrushSize(element);
+  const opacity = getBrushOpacity(element);
+  const spacing = element.brushSpacing ?? Math.max(6, size * 1.6);
+  const jitter = element.brushJitter ?? 0;
+  const composite = element.brushComposite ?? 'source-over';
+
+  ctx.save();
+
+  ctx.globalCompositeOperation = composite;
+  ctx.fillStyle = color;
+  ctx.globalAlpha = opacity;
+
+  forEachSampledPoint(points, spacing, (point, index) => {
+    const seedA = pointSeed(point, index, 31);
+    const seedB = pointSeed(point, index, 34);
+
+    const x = point.x + (pseudoRandom(seedA) - 0.5) * jitter;
+    const y = point.y + (pseudoRandom(seedB) - 0.5) * jitter;
+
+    ctx.beginPath();
+    ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.restore();
+}
+
+function drawSquareStroke(
+  ctx: CanvasRenderingContext2D,
+  element: BrushDrawElement,
+) {
+  const points = element.points ?? [];
+  const color = getBrushColor(element);
+  const size = getBrushSize(element);
+  const opacity = getBrushOpacity(element);
+  const spacing = element.brushSpacing ?? Math.max(4, size * 0.85);
+  const jitter = element.brushJitter ?? 0;
+  const composite = element.brushComposite ?? 'source-over';
+
+  ctx.save();
+
+  ctx.globalCompositeOperation = composite;
+  ctx.fillStyle = color;
+  ctx.globalAlpha = opacity;
+
+  forEachSampledPoint(points, spacing, (point, index, angle) => {
+    const seedA = pointSeed(point, index, 44);
+    const seedB = pointSeed(point, index, 45);
+    const rotation = angle + (pseudoRandom(seedA) - 0.5) * 0.8;
+
+    ctx.save();
+    ctx.translate(
+      point.x + (pseudoRandom(seedA) - 0.5) * jitter,
+      point.y + (pseudoRandom(seedB) - 0.5) * jitter,
+    );
+    ctx.rotate(rotation);
+    ctx.fillRect(-size / 2, -size / 2, size, size);
+    ctx.restore();
+  });
+
+  ctx.restore();
+}
+
+function drawCalligraphyStroke(
+  ctx: CanvasRenderingContext2D,
+  element: BrushDrawElement,
+) {
+  const points = element.points ?? [];
+  const color = getBrushColor(element);
+  const size = getBrushSize(element);
+  const opacity = getBrushOpacity(element);
+  const spacing = Math.max(1, size * 0.22);
+  const angleDeg = element.brushAngle ?? -35;
+  const composite = element.brushComposite ?? 'source-over';
+
+  ctx.save();
+
+  ctx.globalCompositeOperation = composite;
+  ctx.fillStyle = color;
+  ctx.globalAlpha = opacity;
+
+  forEachSampledPoint(points, spacing, (point, index) => {
+    const seed = pointSeed(point, index, 51);
+    const pressure = 0.8 + pseudoRandom(seed) * 0.35;
+
+    ctx.save();
+    ctx.translate(point.x, point.y);
+    ctx.rotate((angleDeg * Math.PI) / 180);
+    ctx.beginPath();
+    ctx.ellipse(
+      0,
+      0,
+      size * 0.62 * pressure,
+      Math.max(1.2, size * 0.18),
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+    ctx.restore();
+  });
+
+  ctx.restore();
+}
+
+function drawGlowStroke(
+  ctx: CanvasRenderingContext2D,
+  element: BrushDrawElement,
+  neon = false,
+) {
+  const points = element.points ?? [];
+  const color = getBrushColor(element);
+  const size = getBrushSize(element);
+  const opacity = getBrushOpacity(element);
+  const glow = element.brushGlow ?? (neon ? 18 : 22);
+  const composite = element.brushComposite ?? 'source-over';
+
+  ctx.save();
+
+  ctx.globalCompositeOperation = composite;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = glow;
+
+  drawSmoothStroke(
+    ctx,
+    points,
+    color,
+    size + (neon ? 2 : 0),
+    opacity * 0.55,
+    composite,
+  );
+
+  drawSmoothStroke(
+    ctx,
+    points,
+    color,
+    Math.max(1, size * 0.45),
+    Math.min(1, opacity),
+    composite,
+  );
+
+  if (neon) {
+    drawSmoothStroke(
+      ctx,
+      points,
+      '#ffffff',
+      Math.max(1, size * 0.16),
+      Math.min(0.95, opacity),
+      composite,
+    );
+  }
+
+  ctx.restore();
+}
+
+function drawWatercolorStroke(
+  ctx: CanvasRenderingContext2D,
+  element: BrushDrawElement,
+) {
+  const points = element.points ?? [];
+  const color = getBrushColor(element);
+  const size = getBrushSize(element);
+  const opacity = getBrushOpacity(element);
+  const spacing = element.brushSpacing ?? 4;
+  const softness = element.brushSoftness ?? 0.7;
+  const composite = element.brushComposite ?? 'source-over';
+
+  ctx.save();
+
+  ctx.globalCompositeOperation = composite;
+  ctx.fillStyle = color;
+
+  forEachSampledPoint(points, spacing, (point, index) => {
+    const seed = pointSeed(point, index, 61);
+    const radius = size * (0.45 + pseudoRandom(seed) * 0.55);
+    const alpha = opacity * (0.08 + pseudoRandom(seed + 8) * 0.16);
+
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = size * softness;
+
+    ctx.beginPath();
+    ctx.arc(
+      point.x + (pseudoRandom(seed + 2) - 0.5) * size * 0.5,
+      point.y + (pseudoRandom(seed + 3) - 0.5) * size * 0.5,
+      radius,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  });
+
+  ctx.restore();
+
+  drawSmoothStroke(
+    ctx,
+    points,
+    color,
+    Math.max(1, size * 0.18),
+    opacity * 0.35,
+    composite,
+  );
+}
+
+function drawCrayonLikeStroke(
+  ctx: CanvasRenderingContext2D,
+  element: BrushDrawElement,
+  kind: 'crayon' | 'chalk' | 'charcoal',
+) {
+  const points = element.points ?? [];
+  const color = getBrushColor(element);
+  const size = getBrushSize(element);
+  const opacity = getBrushOpacity(element);
+  const jitter = element.brushJitter ?? 2;
+  const composite = element.brushComposite ?? 'source-over';
+
+  const passes = kind === 'charcoal' ? 7 : kind === 'chalk' ? 6 : 5;
+  const baseSize = kind === 'charcoal' ? size * 0.55 : size * 0.38;
+  const baseOpacity = kind === 'charcoal' ? opacity * 0.18 : opacity * 0.16;
+
+  drawJitterStroke(
+    ctx,
+    points,
+    color,
+    baseSize,
+    baseOpacity,
+    jitter * 2.2,
+    passes,
+    composite,
+  );
+
+  ctx.save();
+
+  ctx.globalCompositeOperation = composite;
+  ctx.fillStyle = color;
+
+  forEachSampledPoint(points, Math.max(2, size * 0.28), (point, index) => {
+    const seed = pointSeed(point, index, 71);
+    const particleCount = kind === 'charcoal' ? 4 : 3;
+
+    for (let i = 0; i < particleCount; i++) {
+      const dotSeed = seed + i * 9;
+      const angle = pseudoRandom(dotSeed) * Math.PI * 2;
+      const radius = pseudoRandom(dotSeed + 1) * size * 0.62;
+      const dotSize = Math.max(0.7, pseudoRandom(dotSeed + 3) * size * 0.18);
+
+      ctx.globalAlpha = opacity * (0.08 + pseudoRandom(dotSeed + 5) * 0.18);
+
+      if (kind === 'chalk') {
+        ctx.fillRect(
+          point.x + Math.cos(angle) * radius,
+          point.y + Math.sin(angle) * radius,
+          dotSize,
+          dotSize,
+        );
+      } else {
+        ctx.beginPath();
+        ctx.arc(
+          point.x + Math.cos(angle) * radius,
+          point.y + Math.sin(angle) * radius,
+          dotSize,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fill();
+      }
+    }
+  });
+
+  ctx.restore();
+}
+
+function drawPencilStroke(
+  ctx: CanvasRenderingContext2D,
+  element: BrushDrawElement,
+  sketch = false,
+) {
+  const points = element.points ?? [];
+  const color = getBrushColor(element);
+  const size = getBrushSize(element);
+  const opacity = getBrushOpacity(element);
+  const jitter = element.brushJitter ?? (sketch ? 2.5 : 0.8);
+  const composite = element.brushComposite ?? 'source-over';
+
+  drawJitterStroke(
+    ctx,
+    points,
+    color,
+    Math.max(1, size * 0.45),
+    opacity * 0.85,
+    jitter,
+    sketch ? 5 : 3,
+    composite,
+  );
+
+  ctx.save();
+
+  ctx.globalCompositeOperation = composite;
+  ctx.fillStyle = color;
+
+  forEachSampledPoint(points, Math.max(2, size * 0.9), (point, index) => {
+    const seed = pointSeed(point, index, 82);
+
+    ctx.globalAlpha = opacity * (0.06 + pseudoRandom(seed) * 0.11);
+
+    ctx.beginPath();
+    ctx.arc(
+      point.x + (pseudoRandom(seed + 2) - 0.5) * size * 2,
+      point.y + (pseudoRandom(seed + 3) - 0.5) * size * 2,
+      Math.max(0.5, size * 0.16),
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  });
+
+  ctx.restore();
+}
+
+function drawRibbonStroke(
+  ctx: CanvasRenderingContext2D,
+  element: BrushDrawElement,
+) {
+  const points = element.points ?? [];
+
+  if (points.length < 2) return;
+
+  const color = getBrushColor(element);
+  const size = getBrushSize(element);
+  const opacity = getBrushOpacity(element);
+  const composite = element.brushComposite ?? 'source-over';
+
+  const leftSide: Point[] = [];
+  const rightSide: Point[] = [];
+
+  points.forEach((point, index) => {
+    const previous = points[Math.max(0, index - 1)];
+    const next = points[Math.min(points.length - 1, index + 1)];
+
+    const angle = Math.atan2(next.y - previous.y, next.x - previous.x);
+    const normal = angle + Math.PI / 2;
+    const widthSeed = pointSeed(point, index, 91);
+    const width = size * (0.35 + pseudoRandom(widthSeed) * 0.7);
+
+    leftSide.push({
+      x: point.x + Math.cos(normal) * width,
+      y: point.y + Math.sin(normal) * width,
+    });
+
+    rightSide.push({
+      x: point.x - Math.cos(normal) * width,
+      y: point.y - Math.sin(normal) * width,
+    });
+  });
+
+  ctx.save();
+
+  ctx.globalCompositeOperation = composite;
+  ctx.fillStyle = color;
+  ctx.globalAlpha = opacity;
+
+  ctx.beginPath();
+  ctx.moveTo(leftSide[0].x, leftSide[0].y);
+
+  leftSide.forEach((point) => {
+    ctx.lineTo(point.x, point.y);
+  });
+
+  [...rightSide].reverse().forEach((point) => {
+    ctx.lineTo(point.x, point.y);
+  });
+
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.globalAlpha = opacity * 0.35;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawFurStroke(
+  ctx: CanvasRenderingContext2D,
+  element: BrushDrawElement,
+) {
+  const points = element.points ?? [];
+  const color = getBrushColor(element);
+  const size = getBrushSize(element);
+  const opacity = getBrushOpacity(element);
+  const jitter = element.brushJitter ?? 6;
+  const scatter = element.brushScatter ?? 10;
+  const composite = element.brushComposite ?? 'source-over';
+
+  drawSmoothStroke(
+    ctx,
+    points,
+    color,
+    Math.max(1, size * 0.25),
+    opacity * 0.3,
+    composite,
+  );
+
+  ctx.save();
+
+  ctx.globalCompositeOperation = composite;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(0.8, size * 0.08);
+
+  forEachSampledPoint(points, Math.max(2, size * 0.25), (point, index, angle) => {
+    const hairs = 4;
+
+    for (let i = 0; i < hairs; i++) {
+      const seed = pointSeed(point, index, 101 + i);
+      const hairAngle = angle + (pseudoRandom(seed) - 0.5) * 2.8;
+      const length = size * 0.4 + pseudoRandom(seed + 1) * scatter;
+      const startShift = (pseudoRandom(seed + 2) - 0.5) * jitter;
+
+      ctx.globalAlpha = opacity * (0.1 + pseudoRandom(seed + 3) * 0.25);
+
+      ctx.beginPath();
+      ctx.moveTo(
+        point.x + Math.cos(hairAngle + Math.PI / 2) * startShift,
+        point.y + Math.sin(hairAngle + Math.PI / 2) * startShift,
+      );
+      ctx.lineTo(
+        point.x + Math.cos(hairAngle) * length,
+        point.y + Math.sin(hairAngle) * length,
+      );
+      ctx.stroke();
+    }
+  });
+
+  ctx.restore();
+}
+
+function drawShadowStroke(
+  ctx: CanvasRenderingContext2D,
+  element: BrushDrawElement,
+) {
+  const points = element.points ?? [];
+  const color = getBrushColor(element);
+  const size = getBrushSize(element);
+  const opacity = getBrushOpacity(element);
+  const softness = element.brushSoftness ?? 1;
+  const composite = element.brushComposite ?? 'source-over';
+
+  ctx.save();
+
+  ctx.globalCompositeOperation = composite;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = size * softness;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  drawSmoothStroke(
+    ctx,
+    points,
+    color,
+    size,
+    opacity,
+    composite,
+  );
+
+  ctx.restore();
+}
+
+function drawBrushStroke(
+  ctx: CanvasRenderingContext2D,
+  element: BrushDrawElement,
+) {
+  const points = element.points ?? [];
+
+  if (points.length < 2) return;
+
+  const mode = element.brushMode ?? 'normal';
+  const color = getBrushColor(element);
+  const size = getBrushSize(element);
+  const opacity = getBrushOpacity(element);
+  const composite =
+    mode === 'eraser'
+      ? 'destination-out'
+      : element.brushComposite ?? 'source-over';
+
+  switch (mode) {
+    case 'eraser':
+      drawSmoothStroke(
+        ctx,
+        points,
+        '#000000',
+        size,
+        1,
+        'destination-out',
+      );
+      break;
+
+    case 'pencil':
+      drawPencilStroke(ctx, element, false);
+      break;
+
+    case 'sketch':
+      drawPencilStroke(ctx, element, true);
+      break;
+
+    case 'pen':
+      drawSmoothStroke(
+        ctx,
+        points,
+        color,
+        size,
+        opacity,
+        composite,
+      );
+      break;
+
+    case 'ink':
+      drawSmoothStroke(
+        ctx,
+        points,
+        color,
+        size,
+        opacity,
+        composite,
+      );
+
+      withAlpha(ctx, opacity * 0.2, () => {
+        drawSmoothStroke(
+          ctx,
+          points,
+          color,
+          size * 1.45,
+          opacity * 0.25,
+          composite,
+        );
+      });
+      break;
+
+    case 'marker':
+      drawSmoothStroke(
+        ctx,
+        points,
+        color,
+        size,
+        opacity,
+        composite,
+        'round',
+        'round',
+      );
+
+      drawSmoothStroke(
+        ctx,
+        points,
+        color,
+        Math.max(1, size * 0.35),
+        opacity * 0.35,
+        composite,
+      );
+      break;
+
+    case 'calligraphy':
+      drawCalligraphyStroke(ctx, element);
+      break;
+
+    case 'spray':
+      drawSprayStroke(ctx, element);
+      break;
+
+    case 'dotted':
+      drawDottedStroke(ctx, element);
+      break;
+
+    case 'square':
+      drawSquareStroke(ctx, element);
+      break;
+
+    case 'glow':
+      drawGlowStroke(ctx, element, false);
+      break;
+
+    case 'neon':
+      drawGlowStroke(ctx, element, true);
+      break;
+
+    case 'watercolor':
+      drawWatercolorStroke(ctx, element);
+      break;
+
+    case 'crayon':
+      drawCrayonLikeStroke(ctx, element, 'crayon');
+      break;
+
+    case 'chalk':
+      drawCrayonLikeStroke(ctx, element, 'chalk');
+      break;
+
+    case 'charcoal':
+      drawCrayonLikeStroke(ctx, element, 'charcoal');
+      break;
+
+    case 'ribbon':
+      drawRibbonStroke(ctx, element);
+      break;
+
+    case 'fur':
+      drawFurStroke(ctx, element);
+      break;
+
+    case 'shadow':
+      drawShadowStroke(ctx, element);
+      break;
+
+    case 'normal':
+    default:
+      drawSmoothStroke(
+        ctx,
+        points,
+        color,
+        size,
+        opacity,
+        composite,
+      );
+      break;
+  }
+}
+
 function drawShapeOnCtx(
   ctx: CanvasRenderingContext2D,
   shapeType: string,
@@ -328,6 +1224,183 @@ function drawShapeOnCtx(
       break;
     }
 
+    case 'cross': {
+      const thickness = r * 0.35;
+
+      ctx.moveTo(cx - thickness, start.y);
+      ctx.lineTo(cx + thickness, start.y);
+      ctx.lineTo(cx + thickness, cy - thickness);
+      ctx.lineTo(end.x, cy - thickness);
+      ctx.lineTo(end.x, cy + thickness);
+      ctx.lineTo(cx + thickness, cy + thickness);
+      ctx.lineTo(cx + thickness, end.y);
+      ctx.lineTo(cx - thickness, end.y);
+      ctx.lineTo(cx - thickness, cy + thickness);
+      ctx.lineTo(start.x, cy + thickness);
+      ctx.lineTo(start.x, cy - thickness);
+      ctx.lineTo(cx - thickness, cy - thickness);
+      ctx.closePath();
+      break;
+    }
+
+    case 'star-3': {
+      const points = starPoints(cx, cy, r, r * 0.4, 3);
+      ctx.moveTo(points[0][0], points[0][1]);
+      points.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
+      ctx.closePath();
+      break;
+    }
+
+    case 'star-4': {
+      const points = starPoints(cx, cy, r, r * 0.35, 4);
+      ctx.moveTo(points[0][0], points[0][1]);
+      points.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
+      ctx.closePath();
+      break;
+    }
+
+    case 'star-5': {
+      const points = starPoints(cx, cy, r, r * 0.4, 5);
+      ctx.moveTo(points[0][0], points[0][1]);
+      points.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
+      ctx.closePath();
+      break;
+    }
+
+    case 'star-6': {
+      const points = starPoints(cx, cy, r, r * 0.5, 6);
+      ctx.moveTo(points[0][0], points[0][1]);
+      points.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
+      ctx.closePath();
+      break;
+    }
+
+    case 'star-8': {
+      const points = starPoints(cx, cy, r, r * 0.45, 8);
+      ctx.moveTo(points[0][0], points[0][1]);
+      points.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
+      ctx.closePath();
+      break;
+    }
+
+    case 'star-12': {
+      const points = starPoints(cx, cy, r, r * 0.6, 12);
+      ctx.moveTo(points[0][0], points[0][1]);
+      points.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
+      ctx.closePath();
+      break;
+    }
+
+    case 'burst-4': {
+      const points = starPoints(cx, cy, r, r * 0.2, 4);
+      ctx.moveTo(points[0][0], points[0][1]);
+      points.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
+      ctx.closePath();
+      break;
+    }
+
+    case 'burst-8': {
+      const points = starPoints(cx, cy, r, r * 0.3, 8);
+      ctx.moveTo(points[0][0], points[0][1]);
+      points.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
+      ctx.closePath();
+      break;
+    }
+
+    case 'starburst': {
+      const points = starPoints(cx, cy, r, r * 0.55, 16);
+      ctx.moveTo(points[0][0], points[0][1]);
+      points.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
+      ctx.closePath();
+      break;
+    }
+
+    case 'arrow-right': {
+      const headWidth = Math.abs(w) * 0.35;
+      const shaftHeight = Math.abs(h) * 0.35;
+
+      ctx.moveTo(start.x, cy - shaftHeight / 2);
+      ctx.lineTo(end.x - headWidth, cy - shaftHeight / 2);
+      ctx.lineTo(end.x - headWidth, start.y);
+      ctx.lineTo(end.x, cy);
+      ctx.lineTo(end.x - headWidth, end.y);
+      ctx.lineTo(end.x - headWidth, cy + shaftHeight / 2);
+      ctx.lineTo(start.x, cy + shaftHeight / 2);
+      ctx.closePath();
+      break;
+    }
+
+    case 'arrow-left': {
+      const headWidth = Math.abs(w) * 0.35;
+      const shaftHeight = Math.abs(h) * 0.35;
+
+      ctx.moveTo(end.x, cy - shaftHeight / 2);
+      ctx.lineTo(start.x + headWidth, cy - shaftHeight / 2);
+      ctx.lineTo(start.x + headWidth, start.y);
+      ctx.lineTo(start.x, cy);
+      ctx.lineTo(start.x + headWidth, end.y);
+      ctx.lineTo(start.x + headWidth, cy + shaftHeight / 2);
+      ctx.lineTo(end.x, cy + shaftHeight / 2);
+      ctx.closePath();
+      break;
+    }
+
+    case 'arrow-up': {
+      const headWidth = Math.abs(w) * 0.35;
+      const headHeight = Math.abs(h) * 0.35;
+
+      ctx.moveTo(cx - headWidth / 2, end.y);
+      ctx.lineTo(cx - headWidth / 2, start.y + headHeight);
+      ctx.lineTo(start.x, start.y + headHeight);
+      ctx.lineTo(cx, start.y);
+      ctx.lineTo(end.x, start.y + headHeight);
+      ctx.lineTo(cx + headWidth / 2, start.y + headHeight);
+      ctx.lineTo(cx + headWidth / 2, end.y);
+      ctx.closePath();
+      break;
+    }
+
+    case 'arrow-down': {
+      const headWidth = Math.abs(w) * 0.35;
+      const headHeight = Math.abs(h) * 0.35;
+
+      ctx.moveTo(cx - headWidth / 2, start.y);
+      ctx.lineTo(cx - headWidth / 2, end.y - headHeight);
+      ctx.lineTo(start.x, end.y - headHeight);
+      ctx.lineTo(cx, end.y);
+      ctx.lineTo(end.x, end.y - headHeight);
+      ctx.lineTo(cx + headWidth / 2, end.y - headHeight);
+      ctx.lineTo(cx + headWidth / 2, start.y);
+      ctx.closePath();
+      break;
+    }
+
+    case 'arrow-double': {
+      const headWidth = Math.abs(w) * 0.25;
+      const shaftHeight = Math.abs(h) * 0.3;
+
+      ctx.moveTo(start.x, cy);
+      ctx.lineTo(start.x + headWidth, start.y);
+      ctx.lineTo(start.x + headWidth, cy - shaftHeight / 2);
+      ctx.lineTo(end.x - headWidth, cy - shaftHeight / 2);
+      ctx.lineTo(end.x - headWidth, start.y);
+      ctx.lineTo(end.x, cy);
+      ctx.lineTo(end.x - headWidth, end.y);
+      ctx.lineTo(end.x - headWidth, cy + shaftHeight / 2);
+      ctx.lineTo(start.x + headWidth, cy + shaftHeight / 2);
+      ctx.lineTo(start.x + headWidth, end.y);
+      ctx.closePath();
+      break;
+    }
+
+    case 'arrow-chevron':
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, cy);
+      ctx.lineTo(start.x, end.y);
+      ctx.lineTo(cx, cy);
+      ctx.closePath();
+      break;
+
     case 'heart':
     case 'heart-outline':
       ctx.moveTo(cx, end.y);
@@ -335,6 +1408,132 @@ function drawShapeOnCtx(
       ctx.bezierCurveTo(start.x, start.y, cx, start.y, cx, cy - ry * 0.3);
       ctx.bezierCurveTo(cx, start.y, end.x, start.y, end.x, cy);
       ctx.bezierCurveTo(end.x, cy + ry * 0.6, cx, cy + ry * 0.6, cx, end.y);
+      ctx.closePath();
+      break;
+
+    case 'lightning':
+      ctx.moveTo(cx + rx * 0.2, start.y);
+      ctx.lineTo(cx - rx * 0.3, cy);
+      ctx.lineTo(cx + rx * 0.15, cy);
+      ctx.lineTo(cx - rx * 0.2, end.y);
+      ctx.lineTo(cx + rx * 0.3, cy + ry * 0.1);
+      ctx.lineTo(cx - rx * 0.05, cy + ry * 0.1);
+      ctx.closePath();
+      break;
+
+    case 'speech-bubble': {
+      const borderRadius = r * 0.15;
+      const tailX = start.x + rx * 0.3;
+
+      ctx.moveTo(start.x + borderRadius, start.y);
+      ctx.lineTo(end.x - borderRadius, start.y);
+      ctx.quadraticCurveTo(end.x, start.y, end.x, start.y + borderRadius);
+      ctx.lineTo(end.x, end.y - ry * 0.4 - borderRadius);
+      ctx.quadraticCurveTo(
+        end.x,
+        end.y - ry * 0.4,
+        end.x - borderRadius,
+        end.y - ry * 0.4,
+      );
+      ctx.lineTo(tailX + rx * 0.1, end.y - ry * 0.4);
+      ctx.lineTo(tailX, end.y);
+      ctx.lineTo(tailX - rx * 0.05, end.y - ry * 0.4);
+      ctx.lineTo(start.x + borderRadius, end.y - ry * 0.4);
+      ctx.quadraticCurveTo(
+        start.x,
+        end.y - ry * 0.4,
+        start.x,
+        end.y - ry * 0.4 - borderRadius,
+      );
+      ctx.lineTo(start.x, start.y + borderRadius);
+      ctx.quadraticCurveTo(start.x, start.y, start.x + borderRadius, start.y);
+      ctx.closePath();
+      break;
+    }
+
+    case 'cloud': {
+      const cloudRadius = r * 0.35;
+
+      ctx.arc(cx - cloudRadius * 0.9, cy + cloudRadius * 0.2, cloudRadius, Math.PI, 0);
+      ctx.arc(cx + cloudRadius * 0.9, cy + cloudRadius * 0.2, cloudRadius * 0.8, Math.PI, 0);
+      ctx.arc(cx, cy - cloudRadius * 0.4, cloudRadius * 1.2, Math.PI, 0);
+      ctx.arc(
+        cx + cloudRadius * 2,
+        cy + cloudRadius * 0.4,
+        cloudRadius * 0.6,
+        Math.PI * 1.5,
+        Math.PI * 0.5,
+      );
+      ctx.arc(
+        cx - cloudRadius * 2,
+        cy + cloudRadius * 0.4,
+        cloudRadius * 0.6,
+        Math.PI * 0.5,
+        Math.PI * 1.5,
+      );
+      ctx.closePath();
+      break;
+    }
+
+    case 'moon':
+      ctx.arc(cx, cy, r, Math.PI * 0.35, Math.PI * 1.65);
+      ctx.arc(cx - r * 0.3, cy, r * 0.75, Math.PI * 1.65, Math.PI * 0.35, true);
+      ctx.closePath();
+      break;
+
+    case 'sun':
+      ctx.arc(cx, cy, r * 0.5, 0, Math.PI * 2);
+      ctx.closePath();
+
+      applyStyle(ctx, fillMode, fillColor, strokeColor, strokeWidth, opacity);
+
+      for (let i = 0; i < 8; i++) {
+        const angle = (Math.PI * 2 * i) / 8 - Math.PI / 2;
+
+        ctx.beginPath();
+        ctx.moveTo(
+          cx + Math.cos(angle) * r * 0.6,
+          cy + Math.sin(angle) * r * 0.6,
+        );
+        ctx.lineTo(
+          cx + Math.cos(angle) * r,
+          cy + Math.sin(angle) * r,
+        );
+
+        ctx.strokeStyle = strokeColor || fillColor;
+        ctx.lineWidth = strokeWidth;
+        ctx.globalAlpha = opacity;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+
+      return;
+
+    case 'donut':
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.arc(cx, cy, r * 0.5, 0, Math.PI * 2, true);
+      break;
+
+    case 'crescent':
+      ctx.arc(cx, cy, r, Math.PI * 0.2, Math.PI * 1.8);
+      ctx.arc(cx + r * 0.3, cy, r * 0.7, Math.PI * 1.8, Math.PI * 0.2, true);
+      ctx.closePath();
+      break;
+
+    case 'pac-man':
+      ctx.arc(cx, cy, r, Math.PI * 0.25, Math.PI * 1.75);
+      ctx.lineTo(cx, cy);
+      ctx.closePath();
+      break;
+
+    case 'half-circle':
+      ctx.arc(cx, cy, r, Math.PI, 0);
+      ctx.closePath();
+      break;
+
+    case 'quarter-circle':
+      ctx.arc(cx, cy, r, -Math.PI / 2, 0);
+      ctx.lineTo(cx, cy);
       ctx.closePath();
       break;
 
@@ -354,6 +1553,56 @@ function drawShapeOnCtx(
       break;
     }
 
+    case 'pill': {
+      const pillRadius = Math.min(Math.abs(h), Math.abs(w)) / 2;
+
+      ctx.moveTo(start.x + pillRadius, start.y);
+      ctx.lineTo(end.x - pillRadius, start.y);
+      ctx.arc(end.x - pillRadius, cy, pillRadius, -Math.PI / 2, Math.PI / 2);
+      ctx.lineTo(start.x + pillRadius, end.y);
+      ctx.arc(start.x + pillRadius, cy, pillRadius, Math.PI / 2, -Math.PI / 2);
+      ctx.closePath();
+      break;
+    }
+
+    case 'ring':
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.closePath();
+      applyStyle(ctx, 'outline', fillColor, strokeColor, strokeWidth * 4, opacity);
+      return;
+
+    case 'flag':
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, start.y + ry * 0.3);
+      ctx.lineTo(start.x + rx * 1.2, start.y + ry * 0.6);
+      ctx.lineTo(start.x, start.y + ry * 0.6);
+      ctx.closePath();
+
+      applyStyle(ctx, fillMode, fillColor, strokeColor, strokeWidth, opacity);
+
+      ctx.beginPath();
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(start.x, end.y);
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = strokeWidth;
+      ctx.globalAlpha = opacity;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      return;
+
+    case 'badge':
+      ctx.arc(cx, cy - ry * 0.2, r * 0.75, 0, Math.PI * 2);
+      ctx.closePath();
+
+      applyStyle(ctx, fillMode, fillColor, strokeColor, strokeWidth, opacity);
+
+      ctx.beginPath();
+      ctx.moveTo(cx - rx * 0.3, cy + ry * 0.4);
+      ctx.lineTo(cx, end.y);
+      ctx.lineTo(cx + rx * 0.3, cy + ry * 0.4);
+      ctx.closePath();
+      break;
+
     default:
       ctx.rect(start.x, start.y, w, h);
   }
@@ -370,22 +1619,7 @@ function drawElement(ctx: CanvasRenderingContext2D, element: DrawElement) {
 
   switch (element.type) {
     case 'brush':
-      if (element.points && element.points.length > 1) {
-        ctx.beginPath();
-        ctx.moveTo(element.points[0].x, element.points[0].y);
-
-        for (let i = 1; i < element.points.length; i++) {
-          ctx.lineTo(element.points[i].x, element.points[i].y);
-        }
-
-        ctx.strokeStyle = element.color ?? '#000000';
-        ctx.lineWidth = element.size ?? 4;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.globalAlpha = opacity;
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-      }
+      drawBrushStroke(ctx, element as BrushDrawElement);
       break;
 
     case 'shape':
@@ -467,13 +1701,6 @@ function drawElement(ctx: CanvasRenderingContext2D, element: DrawElement) {
   }
 }
 
-interface TextEditor {
-  x: number;
-  y: number;
-  value: string;
-  width: number;
-}
-
 export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -487,7 +1714,7 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
 
   const { layers, toolState, addElement } = useCanvasStore();
 
-  const textState = toolState as typeof toolState & TextToolExtraState;
+  const canvasToolState = toolState as typeof toolState & CanvasToolState;
 
   const visibleElements = layers
     .filter((layer) => layer.visible)
@@ -520,15 +1747,15 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
             x: pos.x,
             y: pos.y,
           },
-          color: textState.textColor ?? '#111827',
-          textColor: textState.textColor ?? '#111827',
-          fontFamily: textState.fontFamily ?? 'Arial',
-          fontSize: textState.fontSize ?? 20,
-          textBold: textState.textBold ?? false,
-          textItalic: textState.textItalic ?? false,
-          textUnderline: textState.textUnderline ?? false,
-          textStrike: textState.textStrike ?? false,
-          textAlign: textState.textAlign ?? 'left',
+          color: canvasToolState.textColor ?? '#111827',
+          textColor: canvasToolState.textColor ?? '#111827',
+          fontFamily: canvasToolState.fontFamily ?? 'Arial',
+          fontSize: canvasToolState.fontSize ?? 20,
+          textBold: canvasToolState.textBold ?? false,
+          textItalic: canvasToolState.textItalic ?? false,
+          textUnderline: canvasToolState.textUnderline ?? false,
+          textStrike: canvasToolState.textStrike ?? false,
+          textAlign: canvasToolState.textAlign ?? 'left',
           textBoxWidth: pos.width,
           opacity: 1,
         } as any);
@@ -536,7 +1763,42 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
 
       setTextEditor(null);
     },
-    [addElement, textState],
+    [addElement, canvasToolState],
+  );
+
+  const buildLiveBrushElement = useCallback(
+    (points: Point[]): BrushDrawElement => {
+      const isEraser = toolState.activeTool === 'eraser';
+
+      return {
+        id: `live-brush-${Date.now()}`,
+        type: 'brush',
+        points,
+        size: canvasToolState.brushSize ?? 4,
+        color: isEraser
+          ? '#000000'
+          : canvasToolState.brushColor ?? '#000000',
+        opacity: isEraser
+          ? 1
+          : canvasToolState.brushOpacity ?? 1,
+        selectedBrush: canvasToolState.selectedBrush ?? 'smooth-pen',
+        brushMode: isEraser
+          ? 'eraser'
+          : canvasToolState.brushMode ?? 'normal',
+        brushSpacing: canvasToolState.brushSpacing ?? 1,
+        brushJitter: canvasToolState.brushJitter ?? 0,
+        brushScatter: canvasToolState.brushScatter ?? 0,
+        brushSoftness: canvasToolState.brushSoftness ?? 0,
+        brushAngle: canvasToolState.brushAngle ?? 0,
+        brushPressure: canvasToolState.brushPressure ?? 0,
+        brushGlow: canvasToolState.brushGlow ?? 0,
+        brushTexture: canvasToolState.brushTexture ?? false,
+        brushComposite: isEraser
+          ? 'destination-out'
+          : canvasToolState.brushComposite ?? 'source-over',
+      } as BrushDrawElement;
+    },
+    [canvasToolState, toolState.activeTool],
   );
 
   const renderCanvas = useCallback(() => {
@@ -554,8 +1816,11 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
 
     visibleElements.forEach((element) => {
       drawElement(ctx, element);
@@ -580,19 +1845,11 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
       );
     }
 
-    if (currentPoints.length > 1 && toolState.activeTool === 'brush') {
-      ctx.beginPath();
-      ctx.moveTo(currentPoints[0].x, currentPoints[0].y);
-
-      for (let i = 1; i < currentPoints.length; i++) {
-        ctx.lineTo(currentPoints[i].x, currentPoints[i].y);
-      }
-
-      ctx.strokeStyle = toolState.brushColor;
-      ctx.lineWidth = toolState.brushSize;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.stroke();
+    if (
+      currentPoints.length > 1 &&
+      (toolState.activeTool === 'brush' || toolState.activeTool === 'eraser')
+    ) {
+      drawBrushStroke(ctx, buildLiveBrushElement(currentPoints));
     }
   }, [
     visibleElements,
@@ -600,6 +1857,7 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
     toolState,
     startPoint,
     endPoint,
+    buildLiveBrushElement,
   ]);
 
   const handleMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -618,13 +1876,13 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
         x: coords.x,
         y: coords.y,
         value: '',
-        width: textState.textBoxWidth ?? 260,
+        width: canvasToolState.textBoxWidth ?? 260,
       });
 
       return;
     }
 
-    if (toolState.activeTool === 'brush') {
+    if (toolState.activeTool === 'brush' || toolState.activeTool === 'eraser') {
       setIsDrawing(true);
       setCurrentPoints([coords]);
       return;
@@ -639,7 +1897,10 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
   const handleMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const coords = getCoords(event);
 
-    if (isDrawing && toolState.activeTool === 'brush') {
+    if (
+      isDrawing &&
+      (toolState.activeTool === 'brush' || toolState.activeTool === 'eraser')
+    ) {
       setCurrentPoints((previous) => [...previous, coords]);
       return;
     }
@@ -653,16 +1914,14 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
     if (
       isDrawing &&
       currentPoints.length > 0 &&
-      toolState.activeTool === 'brush'
+      (toolState.activeTool === 'brush' || toolState.activeTool === 'eraser')
     ) {
+      const brushElement = buildLiveBrushElement(currentPoints);
+
       addElement({
+        ...brushElement,
         id: `brush-${Date.now()}`,
-        type: 'brush',
-        points: currentPoints,
-        size: toolState.brushSize,
-        color: toolState.brushColor,
-        opacity: toolState.brushOpacity,
-      });
+      } as any);
 
       setCurrentPoints([]);
     }
@@ -728,29 +1987,34 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
     };
   }, [renderCanvas]);
 
-  const cursor = toolState.activeTool === 'text' ? 'text' : 'crosshair';
+  const cursor =
+    toolState.activeTool === 'text'
+      ? 'text'
+      : toolState.activeTool === 'eraser'
+        ? 'grab'
+        : 'crosshair';
 
-  const fontSize = textState.fontSize ?? 20;
+  const fontSize = canvasToolState.fontSize ?? 20;
 
   const textareaStyle: React.CSSProperties = {
     position: 'absolute',
     left: textEditor?.x ?? 0,
     top: (textEditor?.y ?? 0) - fontSize * 0.85,
-    width: textEditor?.width ?? textState.textBoxWidth ?? 260,
+    width: textEditor?.width ?? canvasToolState.textBoxWidth ?? 260,
     maxWidth: 'calc(100% - 24px)',
-    fontFamily: textState.fontFamily ?? 'Arial',
+    fontFamily: canvasToolState.fontFamily ?? 'Arial',
     fontSize,
-    fontWeight: textState.textBold ? 'bold' : 'normal',
-    fontStyle: textState.textItalic ? 'italic' : 'normal',
+    fontWeight: canvasToolState.textBold ? 'bold' : 'normal',
+    fontStyle: canvasToolState.textItalic ? 'italic' : 'normal',
     textDecoration:
       [
-        textState.textUnderline ? 'underline' : '',
-        textState.textStrike ? 'line-through' : '',
+        canvasToolState.textUnderline ? 'underline' : '',
+        canvasToolState.textStrike ? 'line-through' : '',
       ]
         .filter(Boolean)
         .join(' ') || 'none',
-    textAlign: (textState.textAlign ?? 'left') as React.CSSProperties['textAlign'],
-    color: textState.textColor ?? '#111827',
+    textAlign: (canvasToolState.textAlign ?? 'left') as React.CSSProperties['textAlign'],
+    color: canvasToolState.textColor ?? '#111827',
     background: 'rgba(99, 102, 241, 0.07)',
     border: '1.5px dashed #6366f1',
     borderRadius: 8,
@@ -762,7 +2026,7 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
     resize: 'horizontal',
     lineHeight: 1.35,
     zIndex: 20,
-    caretColor: textState.textColor ?? '#111827',
+    caretColor: canvasToolState.textColor ?? '#111827',
     overflowY: 'auto',
     overflowX: 'hidden',
     whiteSpace: 'pre-wrap',
