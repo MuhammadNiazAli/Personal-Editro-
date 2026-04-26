@@ -38,6 +38,71 @@ type BrushMode =
   | 'shadow'
   | 'eraser';
 
+type LinePathType =
+  | 'straight'
+  | 'dashed'
+  | 'dotted'
+  | 'double'
+  | 'thin'
+  | 'bold'
+  | 'curved'
+  | 'arc'
+  | 'wave'
+  | 'zigzag'
+  | 'snake'
+  | 'loop'
+  | 'spring'
+  | 'step'
+  | 'elbow'
+  | 'brace'
+  | 'bracket'
+  | 'capsule'
+  | 'rail'
+  | 'lightning'
+  | 'sketch'
+  | 'hairline'
+  | 'rough'
+  | 'center-dot'
+  | 'round-head'
+  | 'square-head';
+
+type LineCapType = 'butt' | 'round' | 'square';
+
+type ArrowDirection =
+  | 'right'
+  | 'left'
+  | 'up'
+  | 'down'
+  | 'up-right'
+  | 'up-left'
+  | 'down-right'
+  | 'down-left'
+  | 'both-horizontal'
+  | 'both-vertical';
+
+type ArrowPathType =
+  | 'straight'
+  | 'curved'
+  | 'elbow'
+  | 'zigzag'
+  | 'wave'
+  | 'arc'
+  | 'loop'
+  | 'block'
+  | 'chevron'
+  | 'split'
+  | 'merge'
+  | 'circular';
+
+type ArrowHeadType =
+  | 'triangle'
+  | 'open'
+  | 'filled'
+  | 'diamond'
+  | 'circle'
+  | 'bar'
+  | 'none';
+
 type TextToolExtraState = {
   fontFamily?: string;
   fontSize?: number;
@@ -67,9 +132,38 @@ type BrushToolExtraState = {
   brushComposite?: GlobalCompositeOperation;
 };
 
-type CanvasToolState = TextToolExtraState & BrushToolExtraState;
+type LineToolExtraState = {
+  selectedLine?: string;
+  linePathType?: LinePathType;
+  lineStrokeStyle?: 'solid' | 'dashed' | 'dotted' | 'double';
+  lineStrokeWidth?: number;
+  lineCap?: LineCapType;
+  lineDash?: number[];
+  lineColor?: string;
+};
 
-type TextDrawElement = DrawElement & {
+type ArrowToolExtraState = {
+  selectedArrow?: string;
+  arrowDirection?: ArrowDirection;
+  arrowPathType?: ArrowPathType;
+  arrowHeadStart?: ArrowHeadType;
+  arrowHeadEnd?: ArrowHeadType;
+  arrowStrokeStyle?: 'solid' | 'dashed' | 'dotted' | 'double';
+  arrowStrokeWidth?: number;
+  arrowColor?: string;
+};
+
+type CanvasToolState =
+  TextToolExtraState &
+  BrushToolExtraState &
+  LineToolExtraState &
+  ArrowToolExtraState;
+
+type CanvasDrawElement = DrawElement & {
+  type: string;
+};
+
+type TextDrawElement = CanvasDrawElement & {
   text?: string;
   textColor?: string;
   textBold?: boolean;
@@ -83,7 +177,7 @@ type TextDrawElement = DrawElement & {
   fontSize?: number;
 };
 
-type BrushDrawElement = DrawElement & {
+type BrushDrawElement = CanvasDrawElement & {
   brushMode?: BrushMode;
   selectedBrush?: string;
   brushSpacing?: number;
@@ -95,6 +189,35 @@ type BrushDrawElement = DrawElement & {
   brushGlow?: number;
   brushTexture?: boolean;
   brushComposite?: GlobalCompositeOperation;
+};
+
+type LineDrawElement = CanvasDrawElement & {
+  position?: Point;
+  endPosition?: Point;
+  selectedLine?: string;
+  linePathType?: LinePathType;
+  lineStrokeStyle?: 'solid' | 'dashed' | 'dotted' | 'double';
+  lineStrokeWidth?: number;
+  lineCap?: LineCapType;
+  lineDash?: number[];
+  lineColor?: string;
+  color?: string;
+  opacity?: number;
+};
+
+type ArrowDrawElement = CanvasDrawElement & {
+  position?: Point;
+  endPosition?: Point;
+  selectedArrow?: string;
+  arrowDirection?: ArrowDirection;
+  arrowPathType?: ArrowPathType;
+  arrowHeadStart?: ArrowHeadType;
+  arrowHeadEnd?: ArrowHeadType;
+  arrowStrokeStyle?: 'solid' | 'dashed' | 'dotted' | 'double';
+  arrowStrokeWidth?: number;
+  arrowColor?: string;
+  color?: string;
+  opacity?: number;
 };
 
 interface TextEditor {
@@ -1108,6 +1231,848 @@ function drawBrushStroke(
   }
 }
 
+function createLinePath(
+  ctx: CanvasRenderingContext2D,
+  start: Point,
+  end: Point,
+  pathType: LinePathType | ArrowPathType,
+) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+  const angle = Math.atan2(dy, dx);
+  const normal = angle + Math.PI / 2;
+
+  const pointAt = (t: number, offset = 0): Point => ({
+    x: start.x + dx * t + Math.cos(normal) * offset,
+    y: start.y + dy * t + Math.sin(normal) * offset,
+  });
+
+  ctx.beginPath();
+
+  switch (pathType) {
+    case 'curved': {
+      const control = pointAt(0.5, Math.min(90, length * 0.28));
+      ctx.moveTo(start.x, start.y);
+      ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
+      break;
+    }
+
+    case 'arc': {
+      const control = pointAt(0.5, -Math.min(110, length * 0.35));
+      ctx.moveTo(start.x, start.y);
+      ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
+      break;
+    }
+
+    case 'wave':
+    case 'snake': {
+      const waves = pathType === 'snake' ? 5 : 3;
+      const amplitude = pathType === 'snake'
+        ? Math.min(36, length * 0.14)
+        : Math.min(24, length * 0.1);
+
+      ctx.moveTo(start.x, start.y);
+
+      for (let i = 1; i <= 80; i++) {
+        const t = i / 80;
+        const offset = Math.sin(t * Math.PI * 2 * waves) * amplitude;
+        const point = pointAt(t, offset);
+        ctx.lineTo(point.x, point.y);
+      }
+      break;
+    }
+
+    case 'zigzag': {
+      const segments = 8;
+      const amplitude = Math.min(34, length * 0.12);
+
+      ctx.moveTo(start.x, start.y);
+
+      for (let i = 1; i <= segments; i++) {
+        const t = i / segments;
+        const offset = i === segments ? 0 : (i % 2 === 0 ? -amplitude : amplitude);
+        const point = pointAt(t, offset);
+        ctx.lineTo(point.x, point.y);
+      }
+      break;
+    }
+
+    case 'lightning': {
+      const points = [
+        pointAt(0, 0),
+        pointAt(0.22, -length * 0.08),
+        pointAt(0.36, length * 0.12),
+        pointAt(0.52, -length * 0.04),
+        pointAt(0.64, length * 0.18),
+        pointAt(1, 0),
+      ];
+
+      ctx.moveTo(points[0].x, points[0].y);
+      points.slice(1).forEach((point) => ctx.lineTo(point.x, point.y));
+      break;
+    }
+
+    case 'spring': {
+      const coils = 9;
+      const amplitude = Math.min(26, length * 0.08);
+
+      ctx.moveTo(start.x, start.y);
+
+      for (let i = 1; i <= 140; i++) {
+        const t = i / 140;
+        const offset = Math.sin(t * Math.PI * 2 * coils) * amplitude;
+        const point = pointAt(t, offset);
+        ctx.lineTo(point.x, point.y);
+      }
+      break;
+    }
+
+    case 'loop': {
+      const c1 = pointAt(0.25, -length * 0.35);
+      const c2 = pointAt(0.45, length * 0.4);
+      const mid = pointAt(0.52, 0);
+      const c3 = pointAt(0.65, -length * 0.35);
+      const c4 = pointAt(0.82, length * 0.25);
+
+      ctx.moveTo(start.x, start.y);
+      ctx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, mid.x, mid.y);
+      ctx.bezierCurveTo(c3.x, c3.y, c4.x, c4.y, end.x, end.y);
+      break;
+    }
+
+    case 'step': {
+      const p1 = pointAt(0.25, 0);
+      const p2 = pointAt(0.25, -length * 0.14);
+      const p3 = pointAt(0.5, -length * 0.14);
+      const p4 = pointAt(0.5, -length * 0.28);
+      const p5 = pointAt(0.75, -length * 0.28);
+      const p6 = pointAt(0.75, -length * 0.42);
+
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.lineTo(p3.x, p3.y);
+      ctx.lineTo(p4.x, p4.y);
+      ctx.lineTo(p5.x, p5.y);
+      ctx.lineTo(p6.x, p6.y);
+      ctx.lineTo(end.x, end.y);
+      break;
+    }
+
+    case 'elbow': {
+      const midX = start.x + dx * 0.5;
+
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(midX, start.y);
+      ctx.lineTo(midX, end.y);
+      ctx.lineTo(end.x, end.y);
+      break;
+    }
+
+    case 'brace': {
+      const p0 = pointAt(0, 0);
+      const p1 = pointAt(0.22, -length * 0.18);
+      const p2 = pointAt(0.35, 0);
+      const p3 = pointAt(0.5, 0);
+      const p4 = pointAt(0.65, 0);
+      const p5 = pointAt(0.78, length * 0.18);
+      const p6 = pointAt(1, 0);
+
+      ctx.moveTo(p0.x, p0.y);
+      ctx.bezierCurveTo(p1.x, p1.y, p1.x, p1.y, p2.x, p2.y);
+      ctx.bezierCurveTo(p3.x, p3.y, p3.x, p3.y, p4.x, p4.y);
+      ctx.bezierCurveTo(p5.x, p5.y, p5.x, p5.y, p6.x, p6.y);
+      break;
+    }
+
+    case 'bracket': {
+      const side = Math.min(38, length * 0.2);
+      const p1 = pointAt(0, side);
+      const p2 = pointAt(1, side);
+
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.lineTo(p2.x, p2.y);
+      break;
+    }
+
+    case 'chevron': {
+      const p0 = pointAt(0.08, -length * 0.16);
+      const p1 = pointAt(0.45, 0);
+      const p2 = pointAt(0.08, length * 0.16);
+      const p3 = pointAt(0.5, -length * 0.16);
+      const p4 = pointAt(0.92, 0);
+      const p5 = pointAt(0.5, length * 0.16);
+
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.moveTo(p3.x, p3.y);
+      ctx.lineTo(p4.x, p4.y);
+      ctx.lineTo(p5.x, p5.y);
+      break;
+    }
+
+    case 'circular': {
+      const radius = Math.min(80, length * 0.35);
+      const center = pointAt(0.5, 0);
+
+      ctx.arc(center.x, center.y, radius, Math.PI * 0.15, Math.PI * 1.85);
+      break;
+    }
+
+    case 'straight':
+    case 'dashed':
+    case 'dotted':
+    case 'double':
+    case 'thin':
+    case 'bold':
+    case 'capsule':
+    case 'rail':
+    case 'hairline':
+    case 'rough':
+    case 'sketch':
+    case 'center-dot':
+    case 'round-head':
+    case 'square-head':
+    default:
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      break;
+  }
+}
+
+function applyLineDash(
+  ctx: CanvasRenderingContext2D,
+  strokeStyle: 'solid' | 'dashed' | 'dotted' | 'double',
+  dash?: number[],
+) {
+  if (dash && dash.length > 0) {
+    ctx.setLineDash(dash);
+    return;
+  }
+
+  if (strokeStyle === 'dashed') {
+    ctx.setLineDash([12, 8]);
+    return;
+  }
+
+  if (strokeStyle === 'dotted') {
+    ctx.setLineDash([1, 8]);
+    return;
+  }
+
+  ctx.setLineDash([]);
+}
+
+function drawLinePathOnce(
+  ctx: CanvasRenderingContext2D,
+  start: Point,
+  end: Point,
+  pathType: LinePathType | ArrowPathType,
+  color: string,
+  strokeWidth: number,
+  opacity: number,
+  lineCap: CanvasLineCap,
+  strokeStyle: 'solid' | 'dashed' | 'dotted' | 'double',
+  dash?: number[],
+) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = strokeWidth;
+  ctx.lineCap = lineCap;
+  ctx.lineJoin = 'round';
+  ctx.globalAlpha = opacity;
+
+  applyLineDash(ctx, strokeStyle, dash);
+  createLinePath(ctx, start, end, pathType);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function getOffsetPoints(start: Point, end: Point, offset: number) {
+  const angle = Math.atan2(end.y - start.y, end.x - start.x);
+  const normal = angle + Math.PI / 2;
+
+  return {
+    start: {
+      x: start.x + Math.cos(normal) * offset,
+      y: start.y + Math.sin(normal) * offset,
+    },
+    end: {
+      x: end.x + Math.cos(normal) * offset,
+      y: end.y + Math.sin(normal) * offset,
+    },
+  };
+}
+
+function drawLineOnCtx(ctx: CanvasRenderingContext2D, element: LineDrawElement) {
+  if (!element.position || !element.endPosition) return;
+
+  const start = element.position;
+  const end = element.endPosition;
+
+  const selectedLine = element.selectedLine ?? 'straight';
+  const pathType = element.linePathType ?? 'straight';
+  const strokeStyle = element.lineStrokeStyle ?? 'solid';
+  const strokeWidth = element.lineStrokeWidth ?? element.size ?? 3;
+  const lineCap = element.lineCap ?? 'round';
+  const color = element.lineColor ?? element.color ?? '#111827';
+  const opacity = element.opacity ?? 1;
+  const dash = element.lineDash ?? [];
+
+  if (selectedLine === 'rough' || pathType === 'rough') {
+    for (let i = 0; i < 3; i++) {
+      const s = {
+        x: start.x + (pseudoRandom(pointSeed(start, i, 201)) - 0.5) * 4,
+        y: start.y + (pseudoRandom(pointSeed(start, i, 202)) - 0.5) * 4,
+      };
+
+      const e = {
+        x: end.x + (pseudoRandom(pointSeed(end, i, 203)) - 0.5) * 4,
+        y: end.y + (pseudoRandom(pointSeed(end, i, 204)) - 0.5) * 4,
+      };
+
+      drawLinePathOnce(
+        ctx,
+        s,
+        e,
+        'straight',
+        color,
+        strokeWidth,
+        opacity * 0.45,
+        lineCap,
+        'solid',
+      );
+    }
+
+    return;
+  }
+
+  if (selectedLine === 'sketch' || pathType === 'sketch') {
+    for (let i = 0; i < 4; i++) {
+      const s = {
+        x: start.x + (pseudoRandom(pointSeed(start, i, 211)) - 0.5) * 7,
+        y: start.y + (pseudoRandom(pointSeed(start, i, 212)) - 0.5) * 7,
+      };
+
+      const e = {
+        x: end.x + (pseudoRandom(pointSeed(end, i, 213)) - 0.5) * 7,
+        y: end.y + (pseudoRandom(pointSeed(end, i, 214)) - 0.5) * 7,
+      };
+
+      drawLinePathOnce(
+        ctx,
+        s,
+        e,
+        'curved',
+        color,
+        strokeWidth,
+        opacity * 0.35,
+        lineCap,
+        'solid',
+      );
+    }
+
+    return;
+  }
+
+  if (strokeStyle === 'double' || pathType === 'double' || pathType === 'rail') {
+    const gap = Math.max(4, strokeWidth * 2.4);
+    const a = getOffsetPoints(start, end, -gap / 2);
+    const b = getOffsetPoints(start, end, gap / 2);
+
+    drawLinePathOnce(
+      ctx,
+      a.start,
+      a.end,
+      pathType === 'rail' ? 'straight' : pathType,
+      color,
+      strokeWidth,
+      opacity,
+      lineCap,
+      'solid',
+    );
+
+    drawLinePathOnce(
+      ctx,
+      b.start,
+      b.end,
+      pathType === 'rail' ? 'straight' : pathType,
+      color,
+      strokeWidth,
+      opacity,
+      lineCap,
+      'solid',
+    );
+
+    if (pathType === 'rail') {
+      const railCount = 9;
+
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(1, strokeWidth * 0.65);
+      ctx.lineCap = 'round';
+      ctx.globalAlpha = opacity * 0.75;
+
+      for (let i = 1; i < railCount; i++) {
+        const t = i / railCount;
+        const center = lerpPoint(start, end, t);
+        const normalAngle = Math.atan2(end.y - start.y, end.x - start.x) + Math.PI / 2;
+
+        const p1 = {
+          x: center.x + Math.cos(normalAngle) * gap,
+          y: center.y + Math.sin(normalAngle) * gap,
+        };
+
+        const p2 = {
+          x: center.x - Math.cos(normalAngle) * gap,
+          y: center.y - Math.sin(normalAngle) * gap,
+        };
+
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
+    return;
+  }
+
+  drawLinePathOnce(
+    ctx,
+    start,
+    end,
+    pathType,
+    color,
+    strokeWidth,
+    opacity,
+    lineCap,
+    strokeStyle,
+    dash,
+  );
+
+  if (pathType === 'center-dot') {
+    const mid = lerpPoint(start, end, 0.5);
+
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = opacity;
+    ctx.beginPath();
+    ctx.arc(mid.x, mid.y, Math.max(4, strokeWidth * 1.8), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  if (selectedLine === 'arrow-line') {
+    const angle = Math.atan2(end.y - start.y, end.x - start.x);
+
+    drawArrowHead(
+      ctx,
+      end,
+      angle,
+      'triangle',
+      color,
+      Math.max(12, strokeWidth * 4),
+      opacity,
+      strokeWidth,
+    );
+  }
+}
+
+function normalizeArrowPoints(
+  start: Point,
+  end: Point,
+  direction: ArrowDirection,
+) {
+  const left = Math.min(start.x, end.x);
+  const right = Math.max(start.x, end.x);
+  const top = Math.min(start.y, end.y);
+  const bottom = Math.max(start.y, end.y);
+  const midX = (left + right) / 2;
+  const midY = (top + bottom) / 2;
+
+  switch (direction) {
+    case 'left':
+      return {
+        start: { x: right, y: midY },
+        end: { x: left, y: midY },
+      };
+
+    case 'up':
+      return {
+        start: { x: midX, y: bottom },
+        end: { x: midX, y: top },
+      };
+
+    case 'down':
+      return {
+        start: { x: midX, y: top },
+        end: { x: midX, y: bottom },
+      };
+
+    case 'up-right':
+      return {
+        start: { x: left, y: bottom },
+        end: { x: right, y: top },
+      };
+
+    case 'up-left':
+      return {
+        start: { x: right, y: bottom },
+        end: { x: left, y: top },
+      };
+
+    case 'down-right':
+      return {
+        start: { x: left, y: top },
+        end: { x: right, y: bottom },
+      };
+
+    case 'down-left':
+      return {
+        start: { x: right, y: top },
+        end: { x: left, y: bottom },
+      };
+
+    case 'both-horizontal':
+      return {
+        start: { x: left, y: midY },
+        end: { x: right, y: midY },
+      };
+
+    case 'both-vertical':
+      return {
+        start: { x: midX, y: top },
+        end: { x: midX, y: bottom },
+      };
+
+    case 'right':
+    default:
+      return {
+        start: { x: left, y: midY },
+        end: { x: right, y: midY },
+      };
+  }
+}
+
+function drawArrowHead(
+  ctx: CanvasRenderingContext2D,
+  tip: Point,
+  angle: number,
+  headType: ArrowHeadType,
+  color: string,
+  size: number,
+  opacity: number,
+  strokeWidth: number,
+) {
+  if (headType === 'none') return;
+
+  const length = Math.max(10, size);
+  const width = Math.max(7, size * 0.72);
+
+  ctx.save();
+  ctx.translate(tip.x, tip.y);
+  ctx.rotate(angle);
+  ctx.globalAlpha = opacity;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = Math.max(1.5, strokeWidth);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  if (headType === 'open') {
+    ctx.beginPath();
+    ctx.moveTo(-length, -width / 2);
+    ctx.lineTo(0, 0);
+    ctx.lineTo(-length, width / 2);
+    ctx.stroke();
+  }
+
+  if (headType === 'triangle' || headType === 'filled') {
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-length, -width / 2);
+    ctx.lineTo(-length, width / 2);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  if (headType === 'diamond') {
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-length / 2, -width / 2);
+    ctx.lineTo(-length, 0);
+    ctx.lineTo(-length / 2, width / 2);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  if (headType === 'circle') {
+    ctx.beginPath();
+    ctx.arc(-length * 0.4, 0, width * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (headType === 'bar') {
+    ctx.beginPath();
+    ctx.moveTo(0, -width * 0.75);
+    ctx.lineTo(0, width * 0.75);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawBlockArrow(
+  ctx: CanvasRenderingContext2D,
+  start: Point,
+  end: Point,
+  color: string,
+  opacity: number,
+) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const angle = Math.atan2(dy, dx);
+  const length = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+  const bodyHeight = Math.min(44, Math.max(18, length * 0.18));
+  const headLength = Math.min(72, Math.max(24, length * 0.24));
+  const bodyLength = Math.max(10, length - headLength);
+
+  ctx.save();
+  ctx.translate(start.x, start.y);
+  ctx.rotate(angle);
+  ctx.fillStyle = color;
+  ctx.globalAlpha = opacity;
+
+  ctx.beginPath();
+  ctx.moveTo(0, -bodyHeight * 0.32);
+  ctx.lineTo(bodyLength, -bodyHeight * 0.32);
+  ctx.lineTo(bodyLength, -bodyHeight * 0.75);
+  ctx.lineTo(length, 0);
+  ctx.lineTo(bodyLength, bodyHeight * 0.75);
+  ctx.lineTo(bodyLength, bodyHeight * 0.32);
+  ctx.lineTo(0, bodyHeight * 0.32);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawSplitArrow(
+  ctx: CanvasRenderingContext2D,
+  start: Point,
+  end: Point,
+  color: string,
+  strokeWidth: number,
+  opacity: number,
+  strokeStyle: 'solid' | 'dashed' | 'dotted' | 'double',
+  headType: ArrowHeadType,
+) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const angle = Math.atan2(dy, dx);
+  const normal = angle + Math.PI / 2;
+  const length = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+  const splitPoint = {
+    x: start.x + dx * 0.48,
+    y: start.y + dy * 0.48,
+  };
+
+  const offset = Math.min(70, length * 0.24);
+  const endA = {
+    x: end.x + Math.cos(normal) * offset,
+    y: end.y + Math.sin(normal) * offset,
+  };
+
+  const endB = {
+    x: end.x - Math.cos(normal) * offset,
+    y: end.y - Math.sin(normal) * offset,
+  };
+
+  drawLinePathOnce(ctx, start, splitPoint, 'straight', color, strokeWidth, opacity, 'round', strokeStyle);
+  drawLinePathOnce(ctx, splitPoint, endA, 'curved', color, strokeWidth, opacity, 'round', strokeStyle);
+  drawLinePathOnce(ctx, splitPoint, endB, 'curved', color, strokeWidth, opacity, 'round', strokeStyle);
+
+  drawArrowHead(ctx, endA, Math.atan2(endA.y - splitPoint.y, endA.x - splitPoint.x), headType, color, Math.max(12, strokeWidth * 4), opacity, strokeWidth);
+  drawArrowHead(ctx, endB, Math.atan2(endB.y - splitPoint.y, endB.x - splitPoint.x), headType, color, Math.max(12, strokeWidth * 4), opacity, strokeWidth);
+}
+
+function drawMergeArrow(
+  ctx: CanvasRenderingContext2D,
+  start: Point,
+  end: Point,
+  color: string,
+  strokeWidth: number,
+  opacity: number,
+  strokeStyle: 'solid' | 'dashed' | 'dotted' | 'double',
+  headType: ArrowHeadType,
+) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const angle = Math.atan2(dy, dx);
+  const normal = angle + Math.PI / 2;
+  const length = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+
+  const offset = Math.min(70, length * 0.24);
+
+  const startA = {
+    x: start.x + Math.cos(normal) * offset,
+    y: start.y + Math.sin(normal) * offset,
+  };
+
+  const startB = {
+    x: start.x - Math.cos(normal) * offset,
+    y: start.y - Math.sin(normal) * offset,
+  };
+
+  const mergePoint = {
+    x: start.x + dx * 0.52,
+    y: start.y + dy * 0.52,
+  };
+
+  drawLinePathOnce(ctx, startA, mergePoint, 'curved', color, strokeWidth, opacity, 'round', strokeStyle);
+  drawLinePathOnce(ctx, startB, mergePoint, 'curved', color, strokeWidth, opacity, 'round', strokeStyle);
+  drawLinePathOnce(ctx, mergePoint, end, 'straight', color, strokeWidth, opacity, 'round', strokeStyle);
+
+  drawArrowHead(ctx, end, Math.atan2(end.y - mergePoint.y, end.x - mergePoint.x), headType, color, Math.max(12, strokeWidth * 4), opacity, strokeWidth);
+}
+
+function drawCircularArrow(
+  ctx: CanvasRenderingContext2D,
+  start: Point,
+  end: Point,
+  color: string,
+  strokeWidth: number,
+  opacity: number,
+  strokeStyle: 'solid' | 'dashed' | 'dotted' | 'double',
+  headType: ArrowHeadType,
+) {
+  const left = Math.min(start.x, end.x);
+  const right = Math.max(start.x, end.x);
+  const top = Math.min(start.y, end.y);
+  const bottom = Math.max(start.y, end.y);
+
+  const cx = (left + right) / 2;
+  const cy = (top + bottom) / 2;
+  const radius = Math.max(18, Math.min(right - left, bottom - top) / 2);
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = strokeWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.globalAlpha = opacity;
+
+  applyLineDash(ctx, strokeStyle);
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, Math.PI * 0.15, Math.PI * 1.85);
+  ctx.stroke();
+
+  ctx.restore();
+
+  const tipAngle = Math.PI * 1.85;
+  const tip = {
+    x: cx + Math.cos(tipAngle) * radius,
+    y: cy + Math.sin(tipAngle) * radius,
+  };
+
+  drawArrowHead(
+    ctx,
+    tip,
+    tipAngle + Math.PI / 2,
+    headType,
+    color,
+    Math.max(12, strokeWidth * 4),
+    opacity,
+    strokeWidth,
+  );
+}
+
+function drawArrowOnCtx(ctx: CanvasRenderingContext2D, element: ArrowDrawElement) {
+  if (!element.position || !element.endPosition) return;
+
+  const direction = element.arrowDirection ?? 'right';
+  const normalized = normalizeArrowPoints(element.position, element.endPosition, direction);
+
+  const start = normalized.start;
+  const end = normalized.end;
+
+  const pathType = element.arrowPathType ?? 'straight';
+  const strokeStyle = element.arrowStrokeStyle ?? 'solid';
+  const strokeWidth = element.arrowStrokeWidth ?? element.size ?? 3;
+  const color = element.arrowColor ?? element.color ?? '#111827';
+  const opacity = element.opacity ?? 1;
+
+  const headStart = direction === 'both-horizontal' || direction === 'both-vertical'
+    ? 'triangle'
+    : element.arrowHeadStart ?? 'none';
+
+  const headEnd = element.arrowHeadEnd ?? 'triangle';
+
+  if (pathType === 'block') {
+    drawBlockArrow(ctx, start, end, color, opacity);
+    return;
+  }
+
+  if (pathType === 'split') {
+    drawSplitArrow(ctx, start, end, color, strokeWidth, opacity, strokeStyle, headEnd);
+    return;
+  }
+
+  if (pathType === 'merge') {
+    drawMergeArrow(ctx, start, end, color, strokeWidth, opacity, strokeStyle, headEnd);
+    return;
+  }
+
+  if (pathType === 'circular') {
+    drawCircularArrow(ctx, element.position, element.endPosition, color, strokeWidth, opacity, strokeStyle, headEnd);
+    return;
+  }
+
+  if (strokeStyle === 'double') {
+    const gap = Math.max(4, strokeWidth * 2.4);
+    const a = getOffsetPoints(start, end, -gap / 2);
+    const b = getOffsetPoints(start, end, gap / 2);
+
+    drawLinePathOnce(ctx, a.start, a.end, pathType, color, strokeWidth, opacity, 'round', 'solid');
+    drawLinePathOnce(ctx, b.start, b.end, pathType, color, strokeWidth, opacity, 'round', 'solid');
+  } else {
+    drawLinePathOnce(ctx, start, end, pathType, color, strokeWidth, opacity, 'round', strokeStyle);
+  }
+
+  const angle = Math.atan2(end.y - start.y, end.x - start.x);
+
+  drawArrowHead(
+    ctx,
+    end,
+    angle,
+    headEnd,
+    color,
+    Math.max(12, strokeWidth * 4),
+    opacity,
+    strokeWidth,
+  );
+
+  drawArrowHead(
+    ctx,
+    start,
+    angle + Math.PI,
+    headStart,
+    color,
+    Math.max(12, strokeWidth * 4),
+    opacity,
+    strokeWidth,
+  );
+}
+
 function drawShapeOnCtx(
   ctx: CanvasRenderingContext2D,
   shapeType: string,
@@ -1611,24 +2576,34 @@ function drawShapeOnCtx(
 }
 
 function drawElement(ctx: CanvasRenderingContext2D, element: DrawElement) {
-  const fillMode = element.shapeFillMode ?? 'filled';
-  const fillColor = element.shapeFillColor ?? element.color ?? '#4f46e5';
-  const strokeColor = element.shapeStrokeColor ?? '#1e1b4b';
-  const strokeWidth = element.shapeStrokeWidth ?? 2;
-  const opacity = element.shapeOpacity ?? element.opacity ?? 1;
+  const canvasElement = element as CanvasDrawElement;
 
-  switch (element.type) {
+  const fillMode = canvasElement.shapeFillMode ?? 'filled';
+  const fillColor = canvasElement.shapeFillColor ?? canvasElement.color ?? '#4f46e5';
+  const strokeColor = canvasElement.shapeStrokeColor ?? '#1e1b4b';
+  const strokeWidth = canvasElement.shapeStrokeWidth ?? 2;
+  const opacity = canvasElement.shapeOpacity ?? canvasElement.opacity ?? 1;
+
+  switch (canvasElement.type) {
     case 'brush':
-      drawBrushStroke(ctx, element as BrushDrawElement);
+      drawBrushStroke(ctx, canvasElement as BrushDrawElement);
+      break;
+
+    case 'line':
+      drawLineOnCtx(ctx, canvasElement as LineDrawElement);
+      break;
+
+    case 'arrow':
+      drawArrowOnCtx(ctx, canvasElement as ArrowDrawElement);
       break;
 
     case 'shape':
-      if (element.position && element.endPosition && element.shapeType) {
+      if (canvasElement.position && canvasElement.endPosition && canvasElement.shapeType) {
         drawShapeOnCtx(
           ctx,
-          element.shapeType,
-          element.position,
-          element.endPosition,
+          canvasElement.shapeType,
+          canvasElement.position,
+          canvasElement.endPosition,
           fillMode,
           fillColor,
           strokeColor,
@@ -1639,7 +2614,7 @@ function drawElement(ctx: CanvasRenderingContext2D, element: DrawElement) {
       break;
 
     case 'text': {
-      const textElement = element as TextDrawElement;
+      const textElement = canvasElement as TextDrawElement;
 
       if (!textElement.position || !textElement.text) return;
 
@@ -1714,6 +2689,7 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
 
   const { layers, toolState, addElement } = useCanvasStore();
 
+  const activeTool = String(toolState.activeTool ?? '');
   const canvasToolState = toolState as typeof toolState & CanvasToolState;
 
   const visibleElements = layers
@@ -1768,7 +2744,7 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
 
   const buildLiveBrushElement = useCallback(
     (points: Point[]): BrushDrawElement => {
-      const isEraser = toolState.activeTool === 'eraser';
+      const isEraser = activeTool === 'eraser';
 
       return {
         id: `live-brush-${Date.now()}`,
@@ -1798,7 +2774,50 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
           : canvasToolState.brushComposite ?? 'source-over',
       } as BrushDrawElement;
     },
-    [canvasToolState, toolState.activeTool],
+    [canvasToolState, activeTool],
+  );
+
+  const buildLiveLineElement = useCallback(
+    (start: Point, end: Point): LineDrawElement => {
+      return {
+        id: `live-line-${Date.now()}`,
+        type: 'line',
+        position: start,
+        endPosition: end,
+        selectedLine: canvasToolState.selectedLine ?? 'straight',
+        linePathType: canvasToolState.linePathType ?? 'straight',
+        lineStrokeStyle: canvasToolState.lineStrokeStyle ?? 'solid',
+        lineStrokeWidth: canvasToolState.lineStrokeWidth ?? 3,
+        lineCap: canvasToolState.lineCap ?? 'round',
+        lineDash: canvasToolState.lineDash ?? [],
+        lineColor: canvasToolState.lineColor ?? canvasToolState.brushColor ?? '#111827',
+        color: canvasToolState.lineColor ?? canvasToolState.brushColor ?? '#111827',
+        opacity: 1,
+      } as LineDrawElement;
+    },
+    [canvasToolState],
+  );
+
+  const buildLiveArrowElement = useCallback(
+    (start: Point, end: Point): ArrowDrawElement => {
+      return {
+        id: `live-arrow-${Date.now()}`,
+        type: 'arrow',
+        position: start,
+        endPosition: end,
+        selectedArrow: canvasToolState.selectedArrow ?? 'arrow-right',
+        arrowDirection: canvasToolState.arrowDirection ?? 'right',
+        arrowPathType: canvasToolState.arrowPathType ?? 'straight',
+        arrowHeadStart: canvasToolState.arrowHeadStart ?? 'none',
+        arrowHeadEnd: canvasToolState.arrowHeadEnd ?? 'triangle',
+        arrowStrokeStyle: canvasToolState.arrowStrokeStyle ?? 'solid',
+        arrowStrokeWidth: canvasToolState.arrowStrokeWidth ?? 3,
+        arrowColor: canvasToolState.arrowColor ?? canvasToolState.brushColor ?? '#111827',
+        color: canvasToolState.arrowColor ?? canvasToolState.brushColor ?? '#111827',
+        opacity: 1,
+      } as ArrowDrawElement;
+    },
+    [canvasToolState],
   );
 
   const renderCanvas = useCallback(() => {
@@ -1829,7 +2848,7 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
     if (
       startPoint &&
       endPoint &&
-      toolState.activeTool === 'shape' &&
+      activeTool === 'shape' &&
       toolState.selectedShape
     ) {
       drawShapeOnCtx(
@@ -1846,24 +2865,43 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
     }
 
     if (
+      startPoint &&
+      endPoint &&
+      activeTool === 'line'
+    ) {
+      drawLineOnCtx(ctx, buildLiveLineElement(startPoint, endPoint));
+    }
+
+    if (
+      startPoint &&
+      endPoint &&
+      activeTool === 'arrow'
+    ) {
+      drawArrowOnCtx(ctx, buildLiveArrowElement(startPoint, endPoint));
+    }
+
+    if (
       currentPoints.length > 1 &&
-      (toolState.activeTool === 'brush' || toolState.activeTool === 'eraser')
+      (activeTool === 'brush' || activeTool === 'eraser')
     ) {
       drawBrushStroke(ctx, buildLiveBrushElement(currentPoints));
     }
   }, [
     visibleElements,
     currentPoints,
+    activeTool,
     toolState,
     startPoint,
     endPoint,
     buildLiveBrushElement,
+    buildLiveLineElement,
+    buildLiveArrowElement,
   ]);
 
   const handleMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const coords = getCoords(event);
 
-    if (toolState.activeTool === 'text') {
+    if (activeTool === 'text') {
       if (textEditor) {
         commitText(textEditor.value, {
           x: textEditor.x,
@@ -1882,13 +2920,13 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
       return;
     }
 
-    if (toolState.activeTool === 'brush' || toolState.activeTool === 'eraser') {
+    if (activeTool === 'brush' || activeTool === 'eraser') {
       setIsDrawing(true);
       setCurrentPoints([coords]);
       return;
     }
 
-    if (toolState.activeTool === 'shape') {
+    if (activeTool === 'shape' || activeTool === 'line' || activeTool === 'arrow') {
       setStartPoint(coords);
       setEndPoint(coords);
     }
@@ -1899,13 +2937,16 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
 
     if (
       isDrawing &&
-      (toolState.activeTool === 'brush' || toolState.activeTool === 'eraser')
+      (activeTool === 'brush' || activeTool === 'eraser')
     ) {
       setCurrentPoints((previous) => [...previous, coords]);
       return;
     }
 
-    if (startPoint && toolState.activeTool === 'shape') {
+    if (
+      startPoint &&
+      (activeTool === 'shape' || activeTool === 'line' || activeTool === 'arrow')
+    ) {
       setEndPoint(coords);
     }
   };
@@ -1914,7 +2955,7 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
     if (
       isDrawing &&
       currentPoints.length > 0 &&
-      (toolState.activeTool === 'brush' || toolState.activeTool === 'eraser')
+      (activeTool === 'brush' || activeTool === 'eraser')
     ) {
       const brushElement = buildLiveBrushElement(currentPoints);
 
@@ -1929,7 +2970,35 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
     if (
       startPoint &&
       endPoint &&
-      toolState.activeTool === 'shape' &&
+      activeTool === 'line'
+    ) {
+      addElement({
+        ...buildLiveLineElement(startPoint, endPoint),
+        id: `line-${Date.now()}`,
+      } as any);
+
+      setStartPoint(null);
+      setEndPoint(null);
+    }
+
+    if (
+      startPoint &&
+      endPoint &&
+      activeTool === 'arrow'
+    ) {
+      addElement({
+        ...buildLiveArrowElement(startPoint, endPoint),
+        id: `arrow-${Date.now()}`,
+      } as any);
+
+      setStartPoint(null);
+      setEndPoint(null);
+    }
+
+    if (
+      startPoint &&
+      endPoint &&
+      activeTool === 'shape' &&
       toolState.selectedShape
     ) {
       addElement({
@@ -1988,11 +3057,13 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
   }, [renderCanvas]);
 
   const cursor =
-    toolState.activeTool === 'text'
+    activeTool === 'text'
       ? 'text'
-      : toolState.activeTool === 'eraser'
+      : activeTool === 'eraser'
         ? 'grab'
-        : 'crosshair';
+        : activeTool === 'line' || activeTool === 'arrow'
+          ? 'crosshair'
+          : 'crosshair';
 
   const fontSize = canvasToolState.fontSize ?? 20;
 
