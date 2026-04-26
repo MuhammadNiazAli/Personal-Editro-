@@ -8,8 +8,8 @@ import {
   Circle,
 } from 'lucide-react';
 
-import { PortalDropdown } from '../components/ui/PortalDropdown';
-import { useCanvasStore } from '../components/store/canvasStore';
+import { PortalDropdown } from '../ui/PortalDropdown';
+import { useCanvasStore } from '../store/canvasStore';
 
 interface EraserSizesProps {
   onSizeChange?: (size: number) => void;

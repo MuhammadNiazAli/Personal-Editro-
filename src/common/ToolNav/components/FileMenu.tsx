@@ -3,7 +3,6 @@
 import React, { useRef, useState } from 'react';
 import {
   Upload,
-  Download,
   Save,
   Printer,
   Share2,
@@ -36,11 +35,6 @@ import {
   HandCoins,
   LineChart,
   CircleDollarSign,
-  Instagram,
-  Facebook,
-  Youtube,
-  Twitter,
-  Linkedin,
   MessageCircle,
   Send,
   Globe,
@@ -72,8 +66,142 @@ interface FileMenuProps {
   onIconSelect?: (icon: CanvasIconData) => void;
 }
 
+type SvgIconProps = {
+  size?: number;
+  className?: string;
+};
+
 type IconItem = CanvasIconData & {
   icon: React.ElementType;
+};
+
+const InstagramIcon: React.FC<SvgIconProps> = ({
+  size = 16,
+  className = '',
+}) => {
+  return (
+    <svg
+      width={size}
+      height={size}
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <rect
+        x="4"
+        y="4"
+        width="16"
+        height="16"
+        rx="5"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <circle
+        cx="12"
+        cy="12"
+        r="4"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <circle cx="17" cy="7" r="1.3" fill="currentColor" />
+    </svg>
+  );
+};
+
+const FacebookIcon: React.FC<SvgIconProps> = ({
+  size = 16,
+  className = '',
+}) => {
+  return (
+    <svg
+      width={size}
+      height={size}
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <path
+        d="M15.2 8.2H13.4C12.8 8.2 12.5 8.55 12.5 9.15V11H15L14.65 13.5H12.5V20H9.8V13.5H7.8V11H9.8V8.85C9.8 6.65 11.15 5.2 13.25 5.2C14.15 5.2 14.9 5.3 15.2 5.35V8.2Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+};
+
+const YouTubeIcon: React.FC<SvgIconProps> = ({
+  size = 16,
+  className = '',
+}) => {
+  return (
+    <svg
+      width={size}
+      height={size}
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <rect
+        x="3"
+        y="6.5"
+        width="18"
+        height="11"
+        rx="3"
+        fill="currentColor"
+      />
+      <path d="M10 9.5L15 12L10 14.5V9.5Z" fill="white" />
+    </svg>
+  );
+};
+
+const XIcon: React.FC<SvgIconProps> = ({
+  size = 16,
+  className = '',
+}) => {
+  return (
+    <svg
+      width={size}
+      height={size}
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <path
+        d="M5 5H8.6L12.7 10.4L17.3 5H20L14 12L20.3 20H16.7L12.1 14L7 20H4.3L10.8 12.5L5 5Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+};
+
+const LinkedInIcon: React.FC<SvgIconProps> = ({
+  size = 16,
+  className = '',
+}) => {
+  return (
+    <svg
+      width={size}
+      height={size}
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <rect
+        x="4"
+        y="4"
+        width="16"
+        height="16"
+        rx="2.5"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path d="M8 10H10.4V17H8V10Z" fill="currentColor" />
+      <path d="M8 7.2H10.4V9.1H8V7.2Z" fill="currentColor" />
+      <path
+        d="M12 10H14.3V11C14.7 10.35 15.4 9.85 16.45 9.85C18.05 9.85 19 10.9 19 12.9V17H16.6V13.25C16.6 12.35 16.25 11.9 15.55 11.9C14.85 11.9 14.4 12.4 14.4 13.25V17H12V10Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
 };
 
 const SOCIAL_ICONS: IconItem[] = [
@@ -86,31 +214,31 @@ const SOCIAL_ICONS: IconItem[] = [
   {
     key: 'instagram',
     name: 'Instagram',
-    icon: Instagram,
+    icon: InstagramIcon,
     category: 'social',
   },
   {
     key: 'facebook',
     name: 'Facebook',
-    icon: Facebook,
+    icon: FacebookIcon,
     category: 'social',
   },
   {
     key: 'youtube',
     name: 'YouTube',
-    icon: Youtube,
+    icon: YouTubeIcon,
     category: 'media',
   },
   {
     key: 'twitter',
     name: 'X / Twitter',
-    icon: Twitter,
+    icon: XIcon,
     category: 'social',
   },
   {
     key: 'linkedin',
     name: 'LinkedIn',
-    icon: Linkedin,
+    icon: LinkedInIcon,
     category: 'business',
   },
   {

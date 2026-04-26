@@ -103,6 +103,13 @@ type ArrowHeadType =
   | 'bar'
   | 'none';
 
+type IconCategory =
+  | 'social'
+  | 'finance'
+  | 'media'
+  | 'business'
+  | 'general';
+
 type TextToolExtraState = {
   fontFamily?: string;
   fontSize?: number;
@@ -153,11 +160,27 @@ type ArrowToolExtraState = {
   arrowColor?: string;
 };
 
+type IconToolExtraState = {
+  selectedIcon?: {
+    key: string;
+    name: string;
+    category: IconCategory;
+    symbol?: string;
+  } | null;
+  selectedIconKey?: string;
+  selectedIconName?: string;
+  selectedIconCategory?: IconCategory;
+  selectedIconSymbol?: string;
+  iconSize?: number;
+  iconColor?: string;
+};
+
 type CanvasToolState =
   TextToolExtraState &
   BrushToolExtraState &
   LineToolExtraState &
-  ArrowToolExtraState;
+  ArrowToolExtraState &
+  IconToolExtraState;
 
 type CanvasDrawElement = DrawElement & {
   type: string;
@@ -216,6 +239,18 @@ type ArrowDrawElement = CanvasDrawElement & {
   arrowStrokeStyle?: 'solid' | 'dashed' | 'dotted' | 'double';
   arrowStrokeWidth?: number;
   arrowColor?: string;
+  color?: string;
+  opacity?: number;
+};
+
+type IconDrawElement = CanvasDrawElement & {
+  position?: Point;
+  iconKey?: string;
+  iconName?: string;
+  iconCategory?: IconCategory;
+  iconSymbol?: string;
+  iconSize?: number;
+  iconColor?: string;
   color?: string;
   opacity?: number;
 };
@@ -580,7 +615,10 @@ function drawSprayStroke(
       const seed = pointSeed(point, index, i + 10);
       const angle = pseudoRandom(seed) * Math.PI * 2;
       const radius = pseudoRandom(seed + 4) * scatter;
-      const dotSize = Math.max(0.7, pseudoRandom(seed + 9) * Math.max(2, size * 0.16));
+      const dotSize = Math.max(
+        0.7,
+        pseudoRandom(seed + 9) * Math.max(2, size * 0.16),
+      );
 
       ctx.globalAlpha = opacity * (0.2 + pseudoRandom(seed + 13) * 0.6);
 
@@ -849,9 +887,13 @@ function drawCrayonLikeStroke(
       const dotSeed = seed + i * 9;
       const angle = pseudoRandom(dotSeed) * Math.PI * 2;
       const radius = pseudoRandom(dotSeed + 1) * size * 0.62;
-      const dotSize = Math.max(0.7, pseudoRandom(dotSeed + 3) * size * 0.18);
+      const dotSize = Math.max(
+        0.7,
+        pseudoRandom(dotSeed + 3) * size * 0.18,
+      );
 
-      ctx.globalAlpha = opacity * (0.08 + pseudoRandom(dotSeed + 5) * 0.18);
+      ctx.globalAlpha =
+        opacity * (0.08 + pseudoRandom(dotSeed + 5) * 0.18);
 
       if (kind === 'chalk') {
         ctx.fillRect(
@@ -1015,29 +1057,33 @@ function drawFurStroke(
   ctx.strokeStyle = color;
   ctx.lineWidth = Math.max(0.8, size * 0.08);
 
-  forEachSampledPoint(points, Math.max(2, size * 0.25), (point, index, angle) => {
-    const hairs = 4;
+  forEachSampledPoint(
+    points,
+    Math.max(2, size * 0.25),
+    (point, index, angle) => {
+      const hairs = 4;
 
-    for (let i = 0; i < hairs; i++) {
-      const seed = pointSeed(point, index, 101 + i);
-      const hairAngle = angle + (pseudoRandom(seed) - 0.5) * 2.8;
-      const length = size * 0.4 + pseudoRandom(seed + 1) * scatter;
-      const startShift = (pseudoRandom(seed + 2) - 0.5) * jitter;
+      for (let i = 0; i < hairs; i++) {
+        const seed = pointSeed(point, index, 101 + i);
+        const hairAngle = angle + (pseudoRandom(seed) - 0.5) * 2.8;
+        const length = size * 0.4 + pseudoRandom(seed + 1) * scatter;
+        const startShift = (pseudoRandom(seed + 2) - 0.5) * jitter;
 
-      ctx.globalAlpha = opacity * (0.1 + pseudoRandom(seed + 3) * 0.25);
+        ctx.globalAlpha = opacity * (0.1 + pseudoRandom(seed + 3) * 0.25);
 
-      ctx.beginPath();
-      ctx.moveTo(
-        point.x + Math.cos(hairAngle + Math.PI / 2) * startShift,
-        point.y + Math.sin(hairAngle + Math.PI / 2) * startShift,
-      );
-      ctx.lineTo(
-        point.x + Math.cos(hairAngle) * length,
-        point.y + Math.sin(hairAngle) * length,
-      );
-      ctx.stroke();
-    }
-  });
+        ctx.beginPath();
+        ctx.moveTo(
+          point.x + Math.cos(hairAngle + Math.PI / 2) * startShift,
+          point.y + Math.sin(hairAngle + Math.PI / 2) * startShift,
+        );
+        ctx.lineTo(
+          point.x + Math.cos(hairAngle) * length,
+          point.y + Math.sin(hairAngle) * length,
+        );
+        ctx.stroke();
+      }
+    },
+  );
 
   ctx.restore();
 }
@@ -1268,9 +1314,10 @@ function createLinePath(
     case 'wave':
     case 'snake': {
       const waves = pathType === 'snake' ? 5 : 3;
-      const amplitude = pathType === 'snake'
-        ? Math.min(36, length * 0.14)
-        : Math.min(24, length * 0.1);
+      const amplitude =
+        pathType === 'snake'
+          ? Math.min(36, length * 0.14)
+          : Math.min(24, length * 0.1);
 
       ctx.moveTo(start.x, start.y);
 
@@ -1291,7 +1338,8 @@ function createLinePath(
 
       for (let i = 1; i <= segments; i++) {
         const t = i / segments;
-        const offset = i === segments ? 0 : (i % 2 === 0 ? -amplitude : amplitude);
+        const offset =
+          i === segments ? 0 : i % 2 === 0 ? -amplitude : amplitude;
         const point = pointAt(t, offset);
         ctx.lineTo(point.x, point.y);
       }
@@ -1621,7 +1669,8 @@ function drawLineOnCtx(ctx: CanvasRenderingContext2D, element: LineDrawElement) 
       for (let i = 1; i < railCount; i++) {
         const t = i / railCount;
         const center = lerpPoint(start, end, t);
-        const normalAngle = Math.atan2(end.y - start.y, end.x - start.x) + Math.PI / 2;
+        const normalAngle =
+          Math.atan2(end.y - start.y, end.x - start.x) + Math.PI / 2;
 
         const p1 = {
           x: center.x + Math.cos(normalAngle) * gap,
@@ -1880,12 +1929,14 @@ function drawSplitArrow(
   const angle = Math.atan2(dy, dx);
   const normal = angle + Math.PI / 2;
   const length = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+
   const splitPoint = {
     x: start.x + dx * 0.48,
     y: start.y + dy * 0.48,
   };
 
   const offset = Math.min(70, length * 0.24);
+
   const endA = {
     x: end.x + Math.cos(normal) * offset,
     y: end.y + Math.sin(normal) * offset,
@@ -1896,12 +1947,63 @@ function drawSplitArrow(
     y: end.y - Math.sin(normal) * offset,
   };
 
-  drawLinePathOnce(ctx, start, splitPoint, 'straight', color, strokeWidth, opacity, 'round', strokeStyle);
-  drawLinePathOnce(ctx, splitPoint, endA, 'curved', color, strokeWidth, opacity, 'round', strokeStyle);
-  drawLinePathOnce(ctx, splitPoint, endB, 'curved', color, strokeWidth, opacity, 'round', strokeStyle);
+  drawLinePathOnce(
+    ctx,
+    start,
+    splitPoint,
+    'straight',
+    color,
+    strokeWidth,
+    opacity,
+    'round',
+    strokeStyle,
+  );
 
-  drawArrowHead(ctx, endA, Math.atan2(endA.y - splitPoint.y, endA.x - splitPoint.x), headType, color, Math.max(12, strokeWidth * 4), opacity, strokeWidth);
-  drawArrowHead(ctx, endB, Math.atan2(endB.y - splitPoint.y, endB.x - splitPoint.x), headType, color, Math.max(12, strokeWidth * 4), opacity, strokeWidth);
+  drawLinePathOnce(
+    ctx,
+    splitPoint,
+    endA,
+    'curved',
+    color,
+    strokeWidth,
+    opacity,
+    'round',
+    strokeStyle,
+  );
+
+  drawLinePathOnce(
+    ctx,
+    splitPoint,
+    endB,
+    'curved',
+    color,
+    strokeWidth,
+    opacity,
+    'round',
+    strokeStyle,
+  );
+
+  drawArrowHead(
+    ctx,
+    endA,
+    Math.atan2(endA.y - splitPoint.y, endA.x - splitPoint.x),
+    headType,
+    color,
+    Math.max(12, strokeWidth * 4),
+    opacity,
+    strokeWidth,
+  );
+
+  drawArrowHead(
+    ctx,
+    endB,
+    Math.atan2(endB.y - splitPoint.y, endB.x - splitPoint.x),
+    headType,
+    color,
+    Math.max(12, strokeWidth * 4),
+    opacity,
+    strokeWidth,
+  );
 }
 
 function drawMergeArrow(
@@ -1937,11 +2039,52 @@ function drawMergeArrow(
     y: start.y + dy * 0.52,
   };
 
-  drawLinePathOnce(ctx, startA, mergePoint, 'curved', color, strokeWidth, opacity, 'round', strokeStyle);
-  drawLinePathOnce(ctx, startB, mergePoint, 'curved', color, strokeWidth, opacity, 'round', strokeStyle);
-  drawLinePathOnce(ctx, mergePoint, end, 'straight', color, strokeWidth, opacity, 'round', strokeStyle);
+  drawLinePathOnce(
+    ctx,
+    startA,
+    mergePoint,
+    'curved',
+    color,
+    strokeWidth,
+    opacity,
+    'round',
+    strokeStyle,
+  );
 
-  drawArrowHead(ctx, end, Math.atan2(end.y - mergePoint.y, end.x - mergePoint.x), headType, color, Math.max(12, strokeWidth * 4), opacity, strokeWidth);
+  drawLinePathOnce(
+    ctx,
+    startB,
+    mergePoint,
+    'curved',
+    color,
+    strokeWidth,
+    opacity,
+    'round',
+    strokeStyle,
+  );
+
+  drawLinePathOnce(
+    ctx,
+    mergePoint,
+    end,
+    'straight',
+    color,
+    strokeWidth,
+    opacity,
+    'round',
+    strokeStyle,
+  );
+
+  drawArrowHead(
+    ctx,
+    end,
+    Math.atan2(end.y - mergePoint.y, end.x - mergePoint.x),
+    headType,
+    color,
+    Math.max(12, strokeWidth * 4),
+    opacity,
+    strokeWidth,
+  );
 }
 
 function drawCircularArrow(
@@ -1979,6 +2122,7 @@ function drawCircularArrow(
   ctx.restore();
 
   const tipAngle = Math.PI * 1.85;
+
   const tip = {
     x: cx + Math.cos(tipAngle) * radius,
     y: cy + Math.sin(tipAngle) * radius,
@@ -1996,11 +2140,18 @@ function drawCircularArrow(
   );
 }
 
-function drawArrowOnCtx(ctx: CanvasRenderingContext2D, element: ArrowDrawElement) {
+function drawArrowOnCtx(
+  ctx: CanvasRenderingContext2D,
+  element: ArrowDrawElement,
+) {
   if (!element.position || !element.endPosition) return;
 
   const direction = element.arrowDirection ?? 'right';
-  const normalized = normalizeArrowPoints(element.position, element.endPosition, direction);
+  const normalized = normalizeArrowPoints(
+    element.position,
+    element.endPosition,
+    direction,
+  );
 
   const start = normalized.start;
   const end = normalized.end;
@@ -2011,9 +2162,10 @@ function drawArrowOnCtx(ctx: CanvasRenderingContext2D, element: ArrowDrawElement
   const color = element.arrowColor ?? element.color ?? '#111827';
   const opacity = element.opacity ?? 1;
 
-  const headStart = direction === 'both-horizontal' || direction === 'both-vertical'
-    ? 'triangle'
-    : element.arrowHeadStart ?? 'none';
+  const headStart =
+    direction === 'both-horizontal' || direction === 'both-vertical'
+      ? 'triangle'
+      : element.arrowHeadStart ?? 'none';
 
   const headEnd = element.arrowHeadEnd ?? 'triangle';
 
@@ -2023,17 +2175,44 @@ function drawArrowOnCtx(ctx: CanvasRenderingContext2D, element: ArrowDrawElement
   }
 
   if (pathType === 'split') {
-    drawSplitArrow(ctx, start, end, color, strokeWidth, opacity, strokeStyle, headEnd);
+    drawSplitArrow(
+      ctx,
+      start,
+      end,
+      color,
+      strokeWidth,
+      opacity,
+      strokeStyle,
+      headEnd,
+    );
     return;
   }
 
   if (pathType === 'merge') {
-    drawMergeArrow(ctx, start, end, color, strokeWidth, opacity, strokeStyle, headEnd);
+    drawMergeArrow(
+      ctx,
+      start,
+      end,
+      color,
+      strokeWidth,
+      opacity,
+      strokeStyle,
+      headEnd,
+    );
     return;
   }
 
   if (pathType === 'circular') {
-    drawCircularArrow(ctx, element.position, element.endPosition, color, strokeWidth, opacity, strokeStyle, headEnd);
+    drawCircularArrow(
+      ctx,
+      element.position,
+      element.endPosition,
+      color,
+      strokeWidth,
+      opacity,
+      strokeStyle,
+      headEnd,
+    );
     return;
   }
 
@@ -2042,10 +2221,41 @@ function drawArrowOnCtx(ctx: CanvasRenderingContext2D, element: ArrowDrawElement
     const a = getOffsetPoints(start, end, -gap / 2);
     const b = getOffsetPoints(start, end, gap / 2);
 
-    drawLinePathOnce(ctx, a.start, a.end, pathType, color, strokeWidth, opacity, 'round', 'solid');
-    drawLinePathOnce(ctx, b.start, b.end, pathType, color, strokeWidth, opacity, 'round', 'solid');
+    drawLinePathOnce(
+      ctx,
+      a.start,
+      a.end,
+      pathType,
+      color,
+      strokeWidth,
+      opacity,
+      'round',
+      'solid',
+    );
+
+    drawLinePathOnce(
+      ctx,
+      b.start,
+      b.end,
+      pathType,
+      color,
+      strokeWidth,
+      opacity,
+      'round',
+      'solid',
+    );
   } else {
-    drawLinePathOnce(ctx, start, end, pathType, color, strokeWidth, opacity, 'round', strokeStyle);
+    drawLinePathOnce(
+      ctx,
+      start,
+      end,
+      pathType,
+      color,
+      strokeWidth,
+      opacity,
+      'round',
+      strokeStyle,
+    );
   }
 
   const angle = Math.atan2(end.y - start.y, end.x - start.x);
@@ -2419,9 +2629,27 @@ function drawShapeOnCtx(
     case 'cloud': {
       const cloudRadius = r * 0.35;
 
-      ctx.arc(cx - cloudRadius * 0.9, cy + cloudRadius * 0.2, cloudRadius, Math.PI, 0);
-      ctx.arc(cx + cloudRadius * 0.9, cy + cloudRadius * 0.2, cloudRadius * 0.8, Math.PI, 0);
-      ctx.arc(cx, cy - cloudRadius * 0.4, cloudRadius * 1.2, Math.PI, 0);
+      ctx.arc(
+        cx - cloudRadius * 0.9,
+        cy + cloudRadius * 0.2,
+        cloudRadius,
+        Math.PI,
+        0,
+      );
+      ctx.arc(
+        cx + cloudRadius * 0.9,
+        cy + cloudRadius * 0.2,
+        cloudRadius * 0.8,
+        Math.PI,
+        0,
+      );
+      ctx.arc(
+        cx,
+        cy - cloudRadius * 0.4,
+        cloudRadius * 1.2,
+        Math.PI,
+        0,
+      );
       ctx.arc(
         cx + cloudRadius * 2,
         cy + cloudRadius * 0.4,
@@ -2575,6 +2803,690 @@ function drawShapeOnCtx(
   applyStyle(ctx, fillMode, fillColor, strokeColor, strokeWidth, opacity);
 }
 
+function drawRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  const safeRadius = Math.min(radius, width / 2, height / 2);
+
+  ctx.beginPath();
+  ctx.moveTo(x + safeRadius, y);
+  ctx.lineTo(x + width - safeRadius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  ctx.lineTo(x + width, y + height - safeRadius);
+  ctx.quadraticCurveTo(
+    x + width,
+    y + height,
+    x + width - safeRadius,
+    y + height,
+  );
+  ctx.lineTo(x + safeRadius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  ctx.lineTo(x, y + safeRadius);
+  ctx.quadraticCurveTo(x, y, x + safeRadius, y);
+  ctx.closePath();
+}
+
+function drawHeartIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  ctx.beginPath();
+  ctx.moveTo(24 * s, 42 * s);
+  ctx.bezierCurveTo(7 * s, 30 * s, 2 * s, 20 * s, 8 * s, 11 * s);
+  ctx.bezierCurveTo(14 * s, 2 * s, 24 * s, 8 * s, 24 * s, 15 * s);
+  ctx.bezierCurveTo(24 * s, 8 * s, 34 * s, 2 * s, 40 * s, 11 * s);
+  ctx.bezierCurveTo(46 * s, 20 * s, 41 * s, 30 * s, 24 * s, 42 * s);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawStarIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const cx = size / 2;
+  const cy = size / 2;
+  const outer = size * 0.44;
+  const inner = size * 0.19;
+  const points = starPoints(cx, cy, outer, inner, 5);
+
+  ctx.beginPath();
+  ctx.moveTo(points[0][0], points[0][1]);
+
+  points.slice(1).forEach(([x, y]) => {
+    ctx.lineTo(x, y);
+  });
+
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawCameraIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  drawRoundedRect(ctx, 6 * s, 14 * s, 36 * s, 26 * s, 5 * s);
+  ctx.fill();
+
+  ctx.clearRect(12 * s, 20 * s, 24 * s, 14 * s);
+
+  ctx.beginPath();
+  ctx.arc(24 * s, 27 * s, 7 * s, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(36 * s, 19 * s, 2 * s, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillRect(16 * s, 9 * s, 16 * s, 6 * s);
+}
+
+function drawMusicIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  ctx.beginPath();
+  ctx.moveTo(28 * s, 8 * s);
+  ctx.lineTo(34 * s, 8 * s);
+  ctx.lineTo(34 * s, 31 * s);
+  ctx.lineTo(28 * s, 31 * s);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillRect(28 * s, 8 * s, 15 * s, 5 * s);
+
+  ctx.beginPath();
+  ctx.arc(22 * s, 33 * s, 7 * s, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(34 * s, 32 * s, 7 * s, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawUsersIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  ctx.beginPath();
+  ctx.arc(24 * s, 17 * s, 8 * s, 0, Math.PI * 2);
+  ctx.fill();
+
+  drawRoundedRect(ctx, 12 * s, 27 * s, 24 * s, 13 * s, 7 * s);
+  ctx.fill();
+
+  ctx.globalAlpha *= 0.65;
+  ctx.beginPath();
+  ctx.arc(10 * s, 20 * s, 6 * s, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(38 * s, 20 * s, 6 * s, 0, Math.PI * 2);
+  ctx.fill();
+
+  drawRoundedRect(ctx, 2 * s, 29 * s, 13 * s, 9 * s, 5 * s);
+  ctx.fill();
+
+  drawRoundedRect(ctx, 33 * s, 29 * s, 13 * s, 9 * s, 5 * s);
+  ctx.fill();
+  ctx.globalAlpha /= 0.65;
+}
+
+function drawBriefcaseIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  drawRoundedRect(ctx, 7 * s, 16 * s, 34 * s, 24 * s, 5 * s);
+  ctx.fill();
+
+  ctx.clearRect(21 * s, 25 * s, 6 * s, 4 * s);
+
+  ctx.beginPath();
+  ctx.lineWidth = Math.max(2, size * 0.055);
+  ctx.strokeStyle = ctx.fillStyle as string;
+  ctx.strokeRect(18 * s, 10 * s, 12 * s, 8 * s);
+}
+
+function drawMessageIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  drawRoundedRect(ctx, 6 * s, 10 * s, 36 * s, 26 * s, 8 * s);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(16 * s, 35 * s);
+  ctx.lineTo(13 * s, 43 * s);
+  ctx.lineTo(25 * s, 36 * s);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawSendIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  ctx.beginPath();
+  ctx.moveTo(5 * s, 24 * s);
+  ctx.lineTo(43 * s, 7 * s);
+  ctx.lineTo(32 * s, 42 * s);
+  ctx.lineTo(23 * s, 28 * s);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(23 * s, 28 * s);
+  ctx.lineTo(43 * s, 7 * s);
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = Math.max(1.5, size * 0.045);
+  ctx.stroke();
+}
+
+function drawGlobeIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  ctx.beginPath();
+  ctx.arc(24 * s, 24 * s, 18 * s, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.ellipse(24 * s, 24 * s, 8 * s, 18 * s, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(7 * s, 24 * s);
+  ctx.lineTo(41 * s, 24 * s);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(11 * s, 15 * s);
+  ctx.lineTo(37 * s, 15 * s);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(11 * s, 33 * s);
+  ctx.lineTo(37 * s, 33 * s);
+  ctx.stroke();
+}
+
+function drawSmileIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  ctx.beginPath();
+  ctx.arc(24 * s, 24 * s, 18 * s, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(18 * s, 20 * s, 2.5 * s, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(30 * s, 20 * s, 2.5 * s, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(24 * s, 26 * s, 9 * s, 0.15 * Math.PI, 0.85 * Math.PI);
+  ctx.stroke();
+}
+
+function drawGamepadIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  drawRoundedRect(ctx, 6 * s, 18 * s, 36 * s, 19 * s, 9 * s);
+  ctx.fill();
+
+  ctx.fillRect(14 * s, 25 * s, 10 * s, 3 * s);
+  ctx.fillRect(17.5 * s, 21.5 * s, 3 * s, 10 * s);
+
+  ctx.beginPath();
+  ctx.arc(31 * s, 26 * s, 2.5 * s, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(37 * s, 30 * s, 2.5 * s, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawVideoIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  drawRoundedRect(ctx, 7 * s, 14 * s, 27 * s, 22 * s, 5 * s);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(34 * s, 21 * s);
+  ctx.lineTo(43 * s, 15 * s);
+  ctx.lineTo(43 * s, 35 * s);
+  ctx.lineTo(34 * s, 29 * s);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawMicIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  drawRoundedRect(ctx, 18 * s, 7 * s, 12 * s, 24 * s, 6 * s);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(24 * s, 24 * s, 16 * s, 0.1 * Math.PI, 0.9 * Math.PI);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(24 * s, 40 * s);
+  ctx.lineTo(24 * s, 33 * s);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(17 * s, 41 * s);
+  ctx.lineTo(31 * s, 41 * s);
+  ctx.stroke();
+}
+
+function drawHeadphonesIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  ctx.beginPath();
+  ctx.arc(24 * s, 25 * s, 17 * s, Math.PI, Math.PI * 2);
+  ctx.stroke();
+
+  drawRoundedRect(ctx, 7 * s, 24 * s, 8 * s, 14 * s, 4 * s);
+  ctx.fill();
+
+  drawRoundedRect(ctx, 33 * s, 24 * s, 8 * s, 14 * s, 4 * s);
+  ctx.fill();
+}
+
+function drawFinanceSymbolIcon(
+  ctx: CanvasRenderingContext2D,
+  symbol: string,
+  size: number,
+) {
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `700 ${Math.floor(size * 0.58)}px Arial`;
+  ctx.fillText(symbol, size / 2, size / 2 + size * 0.03);
+  ctx.restore();
+}
+
+function drawBankIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  ctx.beginPath();
+  ctx.moveTo(24 * s, 6 * s);
+  ctx.lineTo(43 * s, 17 * s);
+  ctx.lineTo(5 * s, 17 * s);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillRect(8 * s, 20 * s, 32 * s, 4 * s);
+
+  for (let i = 0; i < 4; i++) {
+    ctx.fillRect((10 + i * 8) * s, 24 * s, 5 * s, 13 * s);
+  }
+
+  ctx.fillRect(6 * s, 38 * s, 36 * s, 4 * s);
+}
+
+function drawChartIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  ctx.lineWidth = Math.max(2, size * 0.065);
+  ctx.strokeStyle = ctx.fillStyle as string;
+
+  ctx.beginPath();
+  ctx.moveTo(8 * s, 38 * s);
+  ctx.lineTo(17 * s, 29 * s);
+  ctx.lineTo(25 * s, 33 * s);
+  ctx.lineTo(39 * s, 16 * s);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(31 * s, 16 * s);
+  ctx.lineTo(39 * s, 16 * s);
+  ctx.lineTo(39 * s, 24 * s);
+  ctx.stroke();
+}
+
+function drawWalletIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  drawRoundedRect(ctx, 7 * s, 15 * s, 34 * s, 24 * s, 5 * s);
+  ctx.fill();
+
+  drawRoundedRect(ctx, 26 * s, 22 * s, 16 * s, 11 * s, 4 * s);
+  ctx.clearRect(27 * s, 23 * s, 14 * s, 9 * s);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(33 * s, 27.5 * s, 2 * s, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawCreditCardIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  drawRoundedRect(ctx, 6 * s, 13 * s, 36 * s, 24 * s, 5 * s);
+  ctx.fill();
+
+  ctx.clearRect(6 * s, 19 * s, 36 * s, 4 * s);
+
+  ctx.fillRect(12 * s, 29 * s, 9 * s, 3 * s);
+  ctx.fillRect(25 * s, 29 * s, 12 * s, 3 * s);
+}
+
+function drawReceiptIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  ctx.beginPath();
+  ctx.moveTo(12 * s, 6 * s);
+  ctx.lineTo(17 * s, 10 * s);
+  ctx.lineTo(22 * s, 6 * s);
+  ctx.lineTo(27 * s, 10 * s);
+  ctx.lineTo(32 * s, 6 * s);
+  ctx.lineTo(36 * s, 10 * s);
+  ctx.lineTo(36 * s, 42 * s);
+  ctx.lineTo(31 * s, 38 * s);
+  ctx.lineTo(26 * s, 42 * s);
+  ctx.lineTo(21 * s, 38 * s);
+  ctx.lineTo(16 * s, 42 * s);
+  ctx.lineTo(12 * s, 38 * s);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = Math.max(1.5, size * 0.045);
+
+  [18, 25, 32].forEach((y) => {
+    ctx.beginPath();
+    ctx.moveTo(17 * s, y * s);
+    ctx.lineTo(31 * s, y * s);
+    ctx.stroke();
+  });
+}
+
+function drawPiggyBankIcon(ctx: CanvasRenderingContext2D, size: number) {
+  const s = size / 48;
+
+  ctx.beginPath();
+  ctx.ellipse(25 * s, 27 * s, 17 * s, 11 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(39 * s, 25 * s, 6 * s, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(15 * s, 19 * s);
+  ctx.lineTo(10 * s, 12 * s);
+  ctx.lineTo(20 * s, 17 * s);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillRect(15 * s, 36 * s, 4 * s, 6 * s);
+  ctx.fillRect(31 * s, 36 * s, 4 * s, 6 * s);
+
+  ctx.beginPath();
+  ctx.arc(41 * s, 24 * s, 1.5 * s, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+}
+
+function drawIconSymbolFallback(
+  ctx: CanvasRenderingContext2D,
+  key: string,
+  name: string,
+  symbol: string | undefined,
+  size: number,
+) {
+  const text = symbol || name.slice(0, 1).toUpperCase() || key.slice(0, 1).toUpperCase();
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `800 ${Math.floor(size * 0.45)}px Arial`;
+  ctx.fillText(text, size / 2, size / 2 + size * 0.02);
+  ctx.restore();
+}
+
+function drawCanvasIcon(
+  ctx: CanvasRenderingContext2D,
+  iconKey: string,
+  iconName: string,
+  iconCategory: IconCategory,
+  iconSymbol: string | undefined,
+  size: number,
+) {
+  ctx.save();
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = Math.max(2, size * 0.07);
+
+  switch (iconKey) {
+    case 'users':
+      drawUsersIcon(ctx, size);
+      break;
+
+    case 'instagram':
+      drawRoundedRect(ctx, size * 0.12, size * 0.12, size * 0.76, size * 0.76, size * 0.18);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(size * 0.5, size * 0.5, size * 0.19, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(size * 0.72, size * 0.28, size * 0.055, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+
+    case 'facebook':
+      ctx.font = `900 ${Math.floor(size * 0.82)}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('f', size / 2, size * 0.55);
+      break;
+
+    case 'youtube':
+      drawRoundedRect(ctx, size * 0.08, size * 0.22, size * 0.84, size * 0.56, size * 0.14);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.moveTo(size * 0.43, size * 0.36);
+      ctx.lineTo(size * 0.43, size * 0.64);
+      ctx.lineTo(size * 0.65, size * 0.5);
+      ctx.closePath();
+      ctx.fill();
+      break;
+
+    case 'twitter':
+      ctx.font = `900 ${Math.floor(size * 0.62)}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('X', size / 2, size * 0.52);
+      break;
+
+    case 'linkedin':
+      ctx.font = `900 ${Math.floor(size * 0.5)}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('in', size / 2, size * 0.54);
+      break;
+
+    case 'message':
+      drawMessageIcon(ctx, size);
+      break;
+
+    case 'send':
+      drawSendIcon(ctx, size);
+      break;
+
+    case 'globe':
+      drawGlobeIcon(ctx, size);
+      break;
+
+    case 'briefcase':
+      drawBriefcaseIcon(ctx, size);
+      break;
+
+    case 'heart':
+      drawHeartIcon(ctx, size);
+      break;
+
+    case 'star':
+      drawStarIcon(ctx, size);
+      break;
+
+    case 'camera':
+      drawCameraIcon(ctx, size);
+      break;
+
+    case 'music':
+      drawMusicIcon(ctx, size);
+      break;
+
+    case 'video':
+      drawVideoIcon(ctx, size);
+      break;
+
+    case 'mic':
+      drawMicIcon(ctx, size);
+      break;
+
+    case 'headphones':
+      drawHeadphonesIcon(ctx, size);
+      break;
+
+    case 'smile':
+      drawSmileIcon(ctx, size);
+      break;
+
+    case 'gamepad':
+      drawGamepadIcon(ctx, size);
+      break;
+
+    case 'dollar':
+      drawFinanceSymbolIcon(ctx, '$', size);
+      break;
+
+    case 'euro':
+      drawFinanceSymbolIcon(ctx, '€', size);
+      break;
+
+    case 'pound':
+      drawFinanceSymbolIcon(ctx, '£', size);
+      break;
+
+    case 'bitcoin':
+      drawFinanceSymbolIcon(ctx, '₿', size);
+      break;
+
+    case 'bank':
+      drawBankIcon(ctx, size);
+      break;
+
+    case 'chart':
+    case 'line-chart':
+      drawChartIcon(ctx, size);
+      break;
+
+    case 'wallet':
+      drawWalletIcon(ctx, size);
+      break;
+
+    case 'badge-dollar':
+    case 'circle-dollar':
+      ctx.beginPath();
+      ctx.arc(size / 2, size / 2, size * 0.38, 0, Math.PI * 2);
+      ctx.stroke();
+      drawFinanceSymbolIcon(ctx, '$', size);
+      break;
+
+    case 'coins':
+      ctx.beginPath();
+      ctx.ellipse(size * 0.42, size * 0.34, size * 0.26, size * 0.12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(size * 0.55, size * 0.51, size * 0.26, size * 0.12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(size * 0.38, size * 0.66, size * 0.26, size * 0.12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+
+    case 'credit-card':
+      drawCreditCardIcon(ctx, size);
+      break;
+
+    case 'banknote':
+      drawRoundedRect(ctx, size * 0.08, size * 0.2, size * 0.84, size * 0.6, size * 0.08);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(size * 0.5, size * 0.5, size * 0.15, 0, Math.PI * 2);
+      ctx.stroke();
+      drawFinanceSymbolIcon(ctx, '$', size);
+      break;
+
+    case 'receipt':
+      drawReceiptIcon(ctx, size);
+      break;
+
+    case 'piggy-bank':
+      drawPiggyBankIcon(ctx, size);
+      break;
+
+    case 'hand-coins':
+      ctx.beginPath();
+      ctx.arc(size * 0.62, size * 0.25, size * 0.12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(size * 0.72, size * 0.4, size * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(size * 0.12, size * 0.62);
+      ctx.quadraticCurveTo(size * 0.42, size * 0.52, size * 0.82, size * 0.6);
+      ctx.quadraticCurveTo(size * 0.66, size * 0.82, size * 0.22, size * 0.75);
+      ctx.stroke();
+      break;
+
+    default:
+      drawIconSymbolFallback(ctx, iconKey, iconName, iconSymbol, size);
+      break;
+  }
+
+  ctx.restore();
+
+  if (!iconKey && iconCategory) {
+    drawIconSymbolFallback(ctx, iconKey, iconName, iconSymbol, size);
+  }
+}
+
+function drawIconOnCtx(
+  ctx: CanvasRenderingContext2D,
+  element: IconDrawElement,
+) {
+  if (!element.position) return;
+
+  const size = element.iconSize ?? element.size ?? 44;
+  const color = element.iconColor ?? element.color ?? '#111827';
+  const opacity = element.opacity ?? 1;
+
+  const iconKey = element.iconKey ?? '';
+  const iconName = element.iconName ?? 'Icon';
+  const iconCategory = element.iconCategory ?? 'general';
+  const iconSymbol = element.iconSymbol;
+
+  const x = element.position.x;
+  const y = element.position.y;
+
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.translate(x - size / 2, y - size / 2);
+
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(2, size * 0.07);
+
+  drawCanvasIcon(ctx, iconKey, iconName, iconCategory, iconSymbol, size);
+
+  ctx.restore();
+}
+
 function drawElement(ctx: CanvasRenderingContext2D, element: DrawElement) {
   const canvasElement = element as CanvasDrawElement;
 
@@ -2597,8 +3509,16 @@ function drawElement(ctx: CanvasRenderingContext2D, element: DrawElement) {
       drawArrowOnCtx(ctx, canvasElement as ArrowDrawElement);
       break;
 
+    case 'icon':
+      drawIconOnCtx(ctx, canvasElement as IconDrawElement);
+      break;
+
     case 'shape':
-      if (canvasElement.position && canvasElement.endPosition && canvasElement.shapeType) {
+      if (
+        canvasElement.position &&
+        canvasElement.endPosition &&
+        canvasElement.shapeType
+      ) {
         drawShapeOnCtx(
           ctx,
           canvasElement.shapeType,
@@ -2790,8 +3710,14 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
         lineStrokeWidth: canvasToolState.lineStrokeWidth ?? 3,
         lineCap: canvasToolState.lineCap ?? 'round',
         lineDash: canvasToolState.lineDash ?? [],
-        lineColor: canvasToolState.lineColor ?? canvasToolState.brushColor ?? '#111827',
-        color: canvasToolState.lineColor ?? canvasToolState.brushColor ?? '#111827',
+        lineColor:
+          canvasToolState.lineColor ??
+          canvasToolState.brushColor ??
+          '#111827',
+        color:
+          canvasToolState.lineColor ??
+          canvasToolState.brushColor ??
+          '#111827',
         opacity: 1,
       } as LineDrawElement;
     },
@@ -2812,10 +3738,55 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
         arrowHeadEnd: canvasToolState.arrowHeadEnd ?? 'triangle',
         arrowStrokeStyle: canvasToolState.arrowStrokeStyle ?? 'solid',
         arrowStrokeWidth: canvasToolState.arrowStrokeWidth ?? 3,
-        arrowColor: canvasToolState.arrowColor ?? canvasToolState.brushColor ?? '#111827',
-        color: canvasToolState.arrowColor ?? canvasToolState.brushColor ?? '#111827',
+        arrowColor:
+          canvasToolState.arrowColor ??
+          canvasToolState.brushColor ??
+          '#111827',
+        color:
+          canvasToolState.arrowColor ??
+          canvasToolState.brushColor ??
+          '#111827',
         opacity: 1,
       } as ArrowDrawElement;
+    },
+    [canvasToolState],
+  );
+
+  const buildLiveIconElement = useCallback(
+    (position: Point): IconDrawElement => {
+      const selectedIcon = canvasToolState.selectedIcon ?? null;
+
+      return {
+        id: `icon-${Date.now()}`,
+        type: 'icon',
+        position,
+        iconKey:
+          selectedIcon?.key ??
+          canvasToolState.selectedIconKey ??
+          'star',
+        iconName:
+          selectedIcon?.name ??
+          canvasToolState.selectedIconName ??
+          'Icon',
+        iconCategory:
+          selectedIcon?.category ??
+          canvasToolState.selectedIconCategory ??
+          'general',
+        iconSymbol:
+          selectedIcon?.symbol ??
+          canvasToolState.selectedIconSymbol ??
+          '',
+        iconSize: canvasToolState.iconSize ?? 44,
+        iconColor:
+          canvasToolState.iconColor ??
+          canvasToolState.brushColor ??
+          '#111827',
+        color:
+          canvasToolState.iconColor ??
+          canvasToolState.brushColor ??
+          '#111827',
+        opacity: 1,
+      } as IconDrawElement;
     },
     [canvasToolState],
   );
@@ -2920,13 +3891,22 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
       return;
     }
 
+    if (activeTool === 'icon') {
+      addElement(buildLiveIconElement(coords) as any);
+      return;
+    }
+
     if (activeTool === 'brush' || activeTool === 'eraser') {
       setIsDrawing(true);
       setCurrentPoints([coords]);
       return;
     }
 
-    if (activeTool === 'shape' || activeTool === 'line' || activeTool === 'arrow') {
+    if (
+      activeTool === 'shape' ||
+      activeTool === 'line' ||
+      activeTool === 'arrow'
+    ) {
       setStartPoint(coords);
       setEndPoint(coords);
     }
@@ -2945,7 +3925,11 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
 
     if (
       startPoint &&
-      (activeTool === 'shape' || activeTool === 'line' || activeTool === 'arrow')
+      (
+        activeTool === 'shape' ||
+        activeTool === 'line' ||
+        activeTool === 'arrow'
+      )
     ) {
       setEndPoint(coords);
     }
@@ -3013,7 +3997,7 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
         shapeStrokeColor: toolState.shapeStrokeColor ?? '#1e1b4b',
         shapeStrokeWidth: toolState.shapeStrokeWidth ?? 2,
         shapeOpacity: toolState.shapeOpacity ?? 1,
-      });
+      } as any);
 
       setStartPoint(null);
       setEndPoint(null);
@@ -3059,11 +4043,13 @@ export const Canvas: React.FC<CanvasProps> = ({ onCanvasReady }) => {
   const cursor =
     activeTool === 'text'
       ? 'text'
-      : activeTool === 'eraser'
-        ? 'grab'
-        : activeTool === 'line' || activeTool === 'arrow'
-          ? 'crosshair'
-          : 'crosshair';
+      : activeTool === 'icon'
+        ? 'copy'
+        : activeTool === 'eraser'
+          ? 'grab'
+          : activeTool === 'line' || activeTool === 'arrow'
+            ? 'crosshair'
+            : 'crosshair';
 
   const fontSize = canvasToolState.fontSize ?? 20;
 
